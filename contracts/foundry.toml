@@ -1,0 +1,16 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+
+# Monad Configuration
+orbit-rpc-url="https://orbit.devnet.gas.network/rpc"
+eth-rpc-url="https://testnet-rpc.monad.xyz"
+chain_id = 10143
+
+# Compiler settings to match our deployed contract
+solc = "0.8.28"
+optimizer = false
+evm_version = "cancun"
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

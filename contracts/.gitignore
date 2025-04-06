@@ -1,0 +1,47 @@
+# Compiler files
+cache/
+out/
+
+# Broadcast - deployment artifacts
+/broadcast/
+# Uncomment this line if you need to preserve specific broadcast files for CI/docs
+# !/broadcast/example-deployment.json
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+.env.*
+!.env.example
+
+# Private keys and mnemonic phrases
+*private*
+*secret*
+mnemonic*
+*pk
+*password*
+deploy_key
+deploy_key.pub
+key
+key.pub
+
+# VS Code
+.vscode/
+
+# MacOS
+.DS_Store
+
+# Coverage
+coverage/
+lcov.info
+
+# Hardhat (if ever used alongside Foundry)
+artifacts/
+node_modules/
+typechain-types/
+
+# Certora
+.certora*
+.last_confs/
+certora_*
