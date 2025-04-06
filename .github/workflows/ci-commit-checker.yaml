@@ -1,73 +1,30 @@
 ---
-name: Commit Message Check
+name: Lint Commit Messages
 
 on:
   pull_request:
     branches: [main]
 
 jobs:
-  check-commit-message:
+  commitlint:
     name: Check Commit Message Format
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Check Conventional Commits
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install commitlint
         run: |
-          echo "Checking commit messages against conventional commit standard..."
+          npm install --save-dev @commitlint/config-conventional @commitlint/cli
+          echo "module.exports = {extends: ['@commitlint/config-conventional']}" > commitlint.config.js
 
-          # Get all commits in this PR
-          PR_COMMITS=$(git log --format="%H" origin/main..HEAD)
-
-          # Debugging output
-          echo "Found commits between origin/main and HEAD:"
-          git log --oneline origin/main..HEAD || echo "No commits found in range"
-
-          # Show main branch
-          echo "Main branch commit:"
-          git log -n 1 --oneline origin/main || echo "Couldn't access main branch"
-
-          # Show current HEAD
-          echo "Current HEAD commit:"
-          git log -n 1 --oneline HEAD || echo "Couldn't access HEAD"
-
-          # Initialize counters
-          TOTAL_COMMITS=0
-          VALID_COMMITS=0
-
-          # Conventional commit pattern
-          PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|breaking)(\(.+\))?: .+"
-
-          # Check each commit
-          for COMMIT in $PR_COMMITS; do
-            ((TOTAL_COMMITS++))
-
-            # Get commit message
-            COMMIT_MSG=$(git log --format="%s" -n 1 "$COMMIT")
-
-            # Check if message follows conventional format
-            if [[ "$COMMIT_MSG" =~ $PATTERN ]]; then
-              echo "✅ $COMMIT: $COMMIT_MSG"
-              ((VALID_COMMITS++))
-            else
-              echo "❌ $COMMIT: $COMMIT_MSG"
-              echo "   Commit messages must follow the conventional commit format:"
-              echo "   type(scope): description"
-              echo "   Example: feat(button): add new color variants"
-              echo "   Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert, breaking"
-            fi
-          done
-
-          # Summary
-          echo "Results: $VALID_COMMITS/$TOTAL_COMMITS commits follow conventional format"
-
-          # Fail if any commit doesn't follow the pattern
-          if [ $VALID_COMMITS -ne $TOTAL_COMMITS ]; then
-            echo "Error: Some commits don't follow conventional commit format. Please fix them."
-            exit 1
-          else
-            echo "Success! All commits follow conventional commit format."
-          fi
+      - name: Validate commit messages
+        uses: wagoid/commitlint-github-action@v5
+        with:
+          configFile: commitlint.config.js
