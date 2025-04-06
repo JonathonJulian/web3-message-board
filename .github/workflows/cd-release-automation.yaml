@@ -5,8 +5,6 @@ run-name: ${{  github.event.inputs.release_type || 'Auto'  }} Release ${{  githu
 on:
   push:
     branches: [main]
-  repository_dispatch:
-    types: [docker-build-complete]
   workflow_dispatch:
     inputs:
       version:
@@ -300,69 +298,85 @@ jobs:
     name: Trigger Component Builds
     needs: [prepare, determine-version]
     runs-on: ubuntu-latest
+    outputs:
+      api_workflow_id: ${{ steps.trigger_api.outputs.workflow_id }}
+      frontend_workflow_id: ${{ steps.trigger_frontend.outputs.workflow_id }}
     steps:
       - name: Trigger API Build
+        id: trigger_api
         uses: actions/github-script@v7
         with:
           github-token: ${{  github.token  }}
           script: |
-            await github.rest.actions.createWorkflowDispatch({
+            const response = await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'cd-build-api.yaml',
               ref: 'main',
               inputs: {
-                go_version: '1.21',
                 image_tag: '${{  needs.prepare.outputs.version  }}',
                 build_arm: ${{  (github.event.inputs.build_arm == 'true') && 'true' || 'false'  }},
-                create_release: 'false'
+                create_release: 'true'
               }
             });
 
+            // Wait for workflow to be dispatched
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // Get the workflow run ID
+            const workflowRuns = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'cd-build-api.yaml',
+              per_page: 1
+            });
+
+            if (workflowRuns.data.workflow_runs.length > 0) {
+              const workflowId = workflowRuns.data.workflow_runs[0].id;
+              console.log(`API build triggered with workflow ID: ${workflowId}`);
+              core.setOutput('workflow_id', workflowId);
+            } else {
+              console.log('Could not find workflow run ID for API build');
+              core.setOutput('workflow_id', '');
+            }
+
       - name: Trigger Frontend Build
+        id: trigger_frontend
         uses: actions/github-script@v7
         with:
           github-token: ${{  github.token  }}
           script: |
-            await github.rest.actions.createWorkflowDispatch({
+            const response = await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'cd-build-frontend.yaml',
               ref: 'main',
               inputs: {
-                node_version: '18',
+                node_version: '20',
                 image_tag: '${{  needs.prepare.outputs.version  }}',
-                build_arm: ${{  (github.event.inputs.build_arm == 'true') && 'true' || 'false'  }}
+                create_release: 'true'
               }
             });
 
-      - name: Trigger Docker Build
-        run: |
-          # Standard dispatch payload format that we've tested locally
-          echo "Triggering Docker build with version ${{ needs.prepare.outputs.version }}"
+            // Wait for workflow to be dispatched
+            await new Promise(resolve => setTimeout(resolve, 3000));
 
-          # Use the exact format that worked in our local test
-          curl -X POST \
-            -H "Authorization: token ${{ github.token }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/dispatches \
-            -d '{
-              "event_type": "start-docker-build",
-              "client_payload": {
-                "version": "${{ needs.prepare.outputs.version }}",
-                "actor": "${{ needs.prepare.outputs.actor }}",
-                "build_arm": false
-              }
-            }'
+            // Get the workflow run ID
+            const workflowRuns = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'cd-build-frontend.yaml',
+              per_page: 1
+            });
 
-          # Check the curl status
-          CURL_STATUS=$?
-          if [ $CURL_STATUS -ne 0 ]; then
-            echo "::error::Failed to trigger Docker build, curl exited with status $CURL_STATUS"
-            exit 1
-          else
-            echo "::notice::Successfully triggered Docker build for version ${{ needs.prepare.outputs.version }}"
-          fi
+            if (workflowRuns.data.workflow_runs.length > 0) {
+              const workflowId = workflowRuns.data.workflow_runs[0].id;
+              console.log(`Frontend build triggered with workflow ID: ${workflowId}`);
+              core.setOutput('workflow_id', workflowId);
+            } else {
+              console.log('Could not find workflow run ID for Frontend build');
+              core.setOutput('workflow_id', '');
+            }
 
       - name: Build Triggers Summary
         run: |
@@ -373,15 +387,96 @@ jobs:
             echo "| --- | --- |"
             echo "| 🖥️ **API** | ✅ Triggered |"
             echo "| 🌐 **Frontend** | ✅ Triggered |"
-            echo "| 🐳 **Docker** | ✅ Triggered |"
             echo ""
             echo "All builds will use version ${{  needs.prepare.outputs.version  }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Create GitHub Release if requested
+  # Wait for component builds to complete
+  wait-for-builds:
+    name: Wait for Component Builds
+    needs: [prepare, determine-version, trigger-builds]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for API Build
+        if: needs.trigger-builds.outputs.api_workflow_id != ''
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{  github.token  }}
+          script: |
+            const workflowId = '${{ needs.trigger-builds.outputs.api_workflow_id }}';
+
+            if (!workflowId) {
+              console.log('No API workflow ID provided, skipping wait');
+              return;
+            }
+
+            console.log(`Waiting for API build with workflow ID: ${workflowId}`);
+
+            // Poll every 30 seconds for up to 15 minutes
+            for (let i = 0; i < 30; i++) {
+              const { data: run } = await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: workflowId
+              });
+
+              console.log(`API build status: ${run.status}, conclusion: ${run.conclusion}`);
+
+              if (run.status === 'completed') {
+                if (run.conclusion === 'success') {
+                  console.log('API build completed successfully');
+                  break;
+                } else {
+                  throw new Error(`API build failed with conclusion: ${run.conclusion}`);
+                }
+              }
+
+              // Wait 30 seconds before checking again
+              await new Promise(resolve => setTimeout(resolve, 30000));
+            }
+
+      - name: Wait for Frontend Build
+        if: needs.trigger-builds.outputs.frontend_workflow_id != ''
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{  github.token  }}
+          script: |
+            const workflowId = '${{ needs.trigger-builds.outputs.frontend_workflow_id }}';
+
+            if (!workflowId) {
+              console.log('No Frontend workflow ID provided, skipping wait');
+              return;
+            }
+
+            console.log(`Waiting for Frontend build with workflow ID: ${workflowId}`);
+
+            // Poll every 30 seconds for up to 15 minutes
+            for (let i = 0; i < 30; i++) {
+              const { data: run } = await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: workflowId
+              });
+
+              console.log(`Frontend build status: ${run.status}, conclusion: ${run.conclusion}`);
+
+              if (run.status === 'completed') {
+                if (run.conclusion === 'success') {
+                  console.log('Frontend build completed successfully');
+                  break;
+                } else {
+                  throw new Error(`Frontend build failed with conclusion: ${run.conclusion}`);
+                }
+              }
+
+              // Wait 30 seconds before checking again
+              await new Promise(resolve => setTimeout(resolve, 30000));
+            }
+
+  # Create GitHub Release with all artifacts
   github-release:
     name: Create GitHub Release
-    needs: [prepare, determine-version, trigger-builds]
+    needs: [prepare, determine-version, wait-for-builds]
     if: >
       (github.event_name == 'workflow_dispatch' && github.event.inputs.create_github_release == 'true') ||
       github.event_name == 'push'
@@ -394,21 +489,101 @@ jobs:
           ref: ${{  env.RELEASE_BRANCH || format('release/v{0}', needs.prepare.outputs.version)  }}
           token: ${{  github.token  }}
 
-      - name: Get release notes
-        run: |
-          # Generate a basic release notes file if it doesn't exist
-          if [ ! -f "release_notes.md" ]; then
-            echo "Creating a new release notes file"
-            echo "## Release v${{  needs.prepare.outputs.version  }}" > release_notes.md
-            echo "" >> release_notes.md
-            echo "This release includes updates and improvements." >> release_notes.md
-            echo "" >> release_notes.md
-            echo "Full changelog can be auto-generated by GitHub." >> release_notes.md
-          else
-            echo "Using existing release notes file"
-          fi
-          # Display the release notes
-          cat release_notes.md
+      - name: Download API artifacts
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{  github.token  }}
+          script: |
+            // Get the latest successful run of the API build workflow
+            const workflowRuns = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'cd-build-api.yaml',
+              status: 'success',
+              per_page: 1
+            });
+
+            if (workflowRuns.data.workflow_runs.length === 0) {
+              console.log('No successful API build found');
+              return;
+            }
+
+            const runId = workflowRuns.data.workflow_runs[0].id;
+            console.log(`Found API build run ID: ${runId}`);
+
+            // Get artifacts from the workflow run
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId
+            });
+
+            // Download each artifact
+            for (const artifact of artifacts.data.artifacts) {
+              console.log(`Downloading artifact: ${artifact.name}`);
+
+              const download = await github.rest.actions.downloadArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+                archive_format: 'zip'
+              });
+
+              const fs = require('fs');
+              fs.writeFileSync(`${artifact.name}.zip`, Buffer.from(download.data));
+
+              // Extract the zip file
+              const { execSync } = require('child_process');
+              execSync(`mkdir -p artifacts && unzip -o ${artifact.name}.zip -d artifacts/`);
+            }
+
+      - name: Download Frontend artifacts
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{  github.token  }}
+          script: |
+            // Get the latest successful run of the Frontend build workflow
+            const workflowRuns = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'cd-build-frontend.yaml',
+              status: 'success',
+              per_page: 1
+            });
+
+            if (workflowRuns.data.workflow_runs.length === 0) {
+              console.log('No successful Frontend build found');
+              return;
+            }
+
+            const runId = workflowRuns.data.workflow_runs[0].id;
+            console.log(`Found Frontend build run ID: ${runId}`);
+
+            // Get artifacts from the workflow run
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId
+            });
+
+            // Download each artifact
+            for (const artifact of artifacts.data.artifacts) {
+              console.log(`Downloading artifact: ${artifact.name}`);
+
+              const download = await github.rest.actions.downloadArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+                archive_format: 'zip'
+              });
+
+              const fs = require('fs');
+              fs.writeFileSync(`${artifact.name}.zip`, Buffer.from(download.data));
+
+              // Extract the zip file
+              const { execSync } = require('child_process');
+              execSync(`mkdir -p artifacts && unzip -o ${artifact.name}.zip -d artifacts/`);
+            }
 
       - name: Create GitHub Release
         id: create_release
@@ -420,6 +595,8 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          files: |
+            artifacts/*
         env:
           GITHUB_TOKEN: ${{  github.token  }}
 
@@ -439,7 +616,7 @@ jobs:
   # Deploy artifacts if requested
   deploy:
     name: Deploy Artifacts
-    needs: [prepare, github-release, determine-version, trigger-builds]
+    needs: [prepare, github-release, determine-version]
     if: >
       (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_artifacts == 'true' && github.event.inputs.create_github_release == 'true') ||
       github.event_name == 'push'
@@ -465,43 +642,4 @@ jobs:
             echo "| 🌐 **Environment** | Staging |"
             echo "| 👤 **Deployed by** | @${{  needs.prepare.outputs.actor  }} |"
             echo "| 🕒 **Deployment Date** | $(date) |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # Handle build completion notification
-  handle-build-complete:
-    name: Handle Build Completion
-    if: github.event_name == 'repository_dispatch' && github.event.action == 'docker-build-complete'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Process build completion
-        run: |
-          echo "Received build completion notification"
-          echo "Version: ${{  github.event.client_payload.version  }}"
-          echo "Actor: ${{  github.event.client_payload.actor  }}"
-
-          {
-            echo "## 🏁 Build Completion Notification"
-            echo "| Property | Value |"
-            echo "| --- | --- |"
-            echo "| 🏷️ **Version** | v${{  github.event.client_payload.version  }} |"
-            echo "| 👤 **Built by** | @${{  github.event.client_payload.actor  }} |"
-            echo "| 🕒 **Received** | $(date) |"
-            echo "| 🔄 **Event** | docker-build-complete |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Finalize release
-        run: |
-          echo "Finalizing release v${{  github.event.client_payload.version  }}"
-          # Add any finalization steps here
-
-          {
-            echo "## 🎉 Release Finalized"
-            echo "Release v${{  github.event.client_payload.version  }} is now complete!"
-            echo ""
-            echo "All components have been built and deployed:"
-            echo "- ✅ API"
-            echo "- ✅ Frontend"
-            echo "- ✅ Docker images"
-            echo ""
-            echo "The release is now available for use."
           } >> "$GITHUB_STEP_SUMMARY"
