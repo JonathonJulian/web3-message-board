@@ -2,7 +2,6 @@
 # Global variables
 
 # GitHub Authentication
-# Debug: Retrieving GITHUB_TOKEN solely from the environment variable.
 github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"  # Token is fetched exclusively from the environment.
 
 # Nginx settings
