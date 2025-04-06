@@ -1,0 +1,92 @@
+---
+# System hardening tasks
+
+# Configure kernel parameters
+- name: Set security-related kernel parameters
+  ansible.builtin.sysctl:
+    name: "{{item.key}}"
+    value: "{{item.value}}"
+    state: present
+    sysctl_set: yes
+    reload: yes
+  loop:
+    - {key: "net.ipv4.conf.all.accept_redirects", value: "0"}
+    - {key: "net.ipv4.conf.default.accept_redirects", value: "0"}
+    - {key: "net.ipv4.conf.all.secure_redirects", value: "0"}
+    - {key: "net.ipv4.conf.default.secure_redirects", value: "0"}
+    - {key: "net.ipv4.conf.all.accept_source_route", value: "0"}
+    - {key: "net.ipv4.conf.default.accept_source_route", value: "0"}
+    - {key: "net.ipv4.conf.all.send_redirects", value: "0"}
+    - {key: "net.ipv4.conf.default.send_redirects", value: "0"}
+    - {key: "net.ipv4.icmp_echo_ignore_broadcasts", value: "1"}
+    - {key: "net.ipv4.icmp_ignore_bogus_error_responses", value: "1"}
+    - {key: "net.ipv4.tcp_syncookies", value: "1"}
+    - {key: "net.ipv4.tcp_rfc1337", value: "1"}
+    - {key: "fs.protected_hardlinks", value: "1"}
+    - {key: "fs.protected_symlinks", value: "1"}
+  become: true
+  tags: ['security', 'kernel']
+
+# SSH hardening
+- name: Harden SSH configuration
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "{{item.regexp}}"
+    line: "{{item.line}}"
+    state: present
+  loop:
+    - {regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no'}
+    - {regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no'}
+    - {regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes'}
+    - {regexp: '^#?PermitEmptyPasswords', line: 'PermitEmptyPasswords no'}
+    - {regexp: '^#?X11Forwarding', line: 'X11Forwarding no'}
+    - {regexp: '^#?MaxAuthTries', line: 'MaxAuthTries 4'}
+    - {regexp: '^#?ClientAliveInterval', line: 'ClientAliveInterval 300'}
+    - {regexp: '^#?ClientAliveCountMax', line: 'ClientAliveCountMax 0'}
+    - {regexp: '^#?AllowAgentForwarding', line: 'AllowAgentForwarding no'}
+    - {regexp: '^#?TCPKeepAlive', line: 'TCPKeepAlive no'}
+  notify: Restart sshd
+  become: true
+  tags: ['security', 'ssh']
+
+# Install security packages
+- name: Install security packages
+  ansible.builtin.apt:
+    name:
+      - unattended-upgrades
+      - auditd
+      - rkhunter
+      - acl
+    state: present
+  become: true
+  tags: ['security', 'packages']
+
+# Configure automatic updates
+- name: Configure unattended-upgrades
+  ansible.builtin.template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: 0644
+  become: true
+  tags: ['security', 'updates']
+
+# Force restart of SSH if configuration changed
+- name: Check SSH configuration status
+  ansible.builtin.command: grep -q "PermitRootLogin no" /etc/ssh/sshd_config
+  register: ssh_config_check
+  changed_when: ssh_config_check.rc != 0
+  failed_when: false
+  notify: Restart sshd
+  become: true
+  tags: ['security', 'ssh']
+
+# Ensure SSH service is properly enabled
+- name: Ensure SSH service is enabled and running
+  ansible.builtin.service:
+    name: "{{'ssh' if ansible_os_family == 'Debian' else 'sshd'}}"
+    state: started
+    enabled: yes
+  become: true
+  tags: ['security', 'ssh']

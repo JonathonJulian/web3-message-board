@@ -1,0 +1,53 @@
+---
+# Defaults for the logging role
+
+# Agent selection
+logging_agent: alloy  # Options: "promtail" or "alloy"
+
+# Shared variables
+loki_url: "http://localhost:3100"
+log_paths: "/var/log/*.log"
+environment: "production"
+
+# Default logs configuration (used if global 'logs' var is not defined)
+logs:
+  - name: system
+    path: "/var/log/syslog"
+    job: system
+    type: syslog
+
+# Promtail variables
+promtail_version: "2.8.4"
+promtail_install_dir: "/usr/local/bin"
+promtail_config_dir: "/etc/promtail"
+promtail_config_file: "{{ promtail_config_dir }}/promtail.yml"
+promtail_service_name: "promtail"
+
+# Alloy variables
+alloy_version: "1.7.5"
+alloy_install_dir: "/usr/local/bin"
+alloy_config_dir: "/etc/alloy"
+alloy_config_file: "{{ alloy_config_dir }}/alloy.yaml"
+alloy_service_name: "alloy"
+
+# Migration variables
+migrate_bypass_errors: false
+migrate_generate_report: true
+
+# Define log groups here if using multiple file matches
+log_groups:
+  - system
+
+# Example of additional log paths (can be overridden in host/group vars)
+# additional_log_paths:
+#   - name: app
+#     path: /var/log/app/*.log
+#     job: application_logs
+#     labels:
+#       app: myapp
+#       component: backend
+
+# Example of additional labels (can be overridden in host/group vars)
+# additional_labels:
+#   team: infrastructure
+#   app: logging

@@ -1,0 +1,45 @@
+---
+# User management tasks
+
+# Create users and set up their permissions
+- name: Create users
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    groups: "{{ item.groups | default(omit) }}"
+    shell: "{{ item.shell | default('/bin/bash') }}"
+    state: "{{ item.state | default('present') }}"
+    create_home: "{{ item.create_home | default(true) }}"
+    append: "{{ item.append | default(true) }}"
+  loop: "{{ users }}"
+  tags: users
+
+# Set up SSH key-based authentication for users that have SSH keys
+- name: Create .ssh directory for users
+  ansible.builtin.file:
+    path: "/home/{{ item.name }}/.ssh"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: 0700
+  loop: "{{ users | selectattr('ssh_key', 'defined') | rejectattr('ssh_key', 'none') | list }}"
+  tags: users
+
+- name: Add SSH public keys to authorized_keys for users
+  ansible.posix.authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ item.ssh_key.key }}"
+    state: "{{ item.ssh_key.state | default('present') }}"
+  loop: "{{ users | selectattr('ssh_key', 'defined') | rejectattr('ssh_key', 'none') | list }}"
+  tags: users
+
+# Configure sudoers for users
+- name: Configure sudoers for users
+  ansible.builtin.template:
+    src: user_sudoers.j2
+    dest: "{{ sudoers_dir }}/{{ item.name }}"
+    owner: root
+    group: root
+    mode: 0440
+    validate: 'visudo -cf %s'
+  loop: "{{ users | selectattr('sudoers', 'defined') | list }}"
+  tags: users

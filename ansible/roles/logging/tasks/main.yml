@@ -1,0 +1,87 @@
+---
+# Detect and configure appropriate logging agent (Promtail or Alloy)
+
+# Variables to use
+- name: Set default log agent if not specified
+  ansible.builtin.set_fact:
+    logging_agent: "{{ logging_agent | default('alloy') | trim }}"
+
+# Detect what's currently installed
+- name: Check if Promtail is installed
+  ansible.builtin.stat:
+    path: "{{ promtail_install_dir }}/promtail"
+  register: promtail_binary
+
+- name: Check if Alloy is installed
+  ansible.builtin.stat:
+    path: "{{ alloy_install_dir | default('/usr/local/bin') }}/alloy"
+  register: alloy_binary
+
+# Determine which agent to use based on detection and preference
+- name: Set detected logging agent
+  ansible.builtin.set_fact:
+    detected_agent: >-
+      {% if promtail_binary.stat.exists and not alloy_binary.stat.exists %}
+      promtail
+      {% elif alloy_binary.stat.exists and not promtail_binary.stat.exists %}
+      alloy
+      {% elif alloy_binary.stat.exists and promtail_binary.stat.exists %}
+      both
+      {% else %}
+      none
+      {% endif %}
+
+- name: Set detected agent trimmed value
+  ansible.builtin.set_fact:
+    detected_agent_trimmed: "{{ detected_agent | trim }}"
+
+- name: Display detected logging agent
+  ansible.builtin.debug:
+    msg: "Detected logging agent: {{ detected_agent_trimmed }}"
+
+# Decide which agent to install/configure
+- name: Determine logging agent to use
+  ansible.builtin.set_fact:
+    effective_agent: >-
+      {% if detected_agent_trimmed == 'none' or detected_agent_trimmed == logging_agent %}
+      {{ logging_agent }}
+      {% elif detected_agent_trimmed == 'both' %}
+      {{ logging_agent }}
+      {% else %}
+      {{ detected_agent_trimmed }}
+      {% endif %}
+
+- name: Set effective agent trimmed value
+  ansible.builtin.set_fact:
+    effective_agent_trimmed: "{{ effective_agent | trim }}"
+
+- name: Display effective logging agent
+  ansible.builtin.debug:
+    msg: "Using logging agent: {{ effective_agent_trimmed }}"
+
+# Configure log rotation
+- name: Configure logrotate
+  ansible.builtin.include_tasks: logrotate.yml
+  tags: ['logging', 'logrotate']
+
+# Install and configure appropriate agent
+- name: Install and configure Promtail
+  ansible.builtin.include_tasks: promtail.yml
+  when: effective_agent_trimmed == "promtail"
+
+- name: Install and configure Alloy
+  ansible.builtin.include_tasks: alloy.yml
+  when: effective_agent_trimmed == "alloy"
+
+# Handle migration if needed
+- name: Detect need for migration
+  ansible.builtin.set_fact:
+    need_migration: "{{ detected_agent_trimmed == 'promtail' and logging_agent == 'alloy' }}"
+
+- name: Display migration status
+  ansible.builtin.debug:
+    msg: "Migration needed: {{ need_migration }}"
+
+- name: Migrate from Promtail to Alloy
+  ansible.builtin.include_tasks: migrate.yml
+  when: need_migration | bool

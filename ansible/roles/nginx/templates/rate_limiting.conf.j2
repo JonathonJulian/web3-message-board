@@ -1,0 +1,26 @@
+# Rate Limiting Configuration
+# Added by Ansible
+
+{% if nginx_rate_limit_enabled %}
+# Define rate limiting zone
+limit_req_zone {{ nginx_rate_limit_zone }} zone=app_limit:{{ nginx_rate_limit_size }} rate={{ nginx_rate_limit_rate }};
+
+# Set rate limiting status codes
+limit_req_status 429;
+
+# Apply rate limiting to all servers
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    # Apply rate limiting to all requests
+    limit_req zone=app_limit burst={{ nginx_rate_limit_burst }} nodelay;
+
+    # Rate limiting error handling
+    error_page 429 /429.html;
+    location = /429.html {
+        root /var/www/error_pages;
+        internal;
+    }
+}
+{% endif %}

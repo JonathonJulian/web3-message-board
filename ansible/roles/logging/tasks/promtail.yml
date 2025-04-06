@@ -1,0 +1,67 @@
+---
+# Install and configure Promtail for log collection
+
+- name: Create Promtail configuration directory
+  ansible.builtin.file:
+    path: "{{ promtail_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Download Promtail binary
+  ansible.builtin.get_url:
+    url: "https://github.com/grafana/loki/releases/download/v{{ promtail_version }}/promtail-linux-amd64.zip"
+    dest: "/tmp/promtail-{{ promtail_version }}.zip"
+    mode: 0644
+  register: download_result
+
+- name: Install unzip package
+  ansible.builtin.apt:
+    name: unzip
+    state: present
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Extract Promtail binary
+  ansible.builtin.unarchive:
+    src: "/tmp/promtail-{{ promtail_version }}.zip"
+    dest: "/tmp"
+    remote_src: yes
+  when: download_result.changed
+
+- name: Copy Promtail binary to installation directory
+  ansible.builtin.copy:
+    src: "/tmp/promtail-linux-amd64"
+    dest: "{{ promtail_install_dir }}/promtail"
+    mode: 0755
+    remote_src: yes
+  when: download_result.changed
+  notify: Restart Promtail
+
+- name: Create Promtail configuration file
+  ansible.builtin.template:
+    src: promtail-config.yml.j2
+    dest: "{{ promtail_config_file }}"
+    owner: root
+    group: root
+    mode: 0644
+    lstrip_blocks: true
+    trim_blocks: true
+  notify: Restart Promtail
+
+- name: Create Promtail systemd service file
+  ansible.builtin.template:
+    src: promtail.service.j2
+    dest: /etc/systemd/system/{{ promtail_service_name }}.service
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart Promtail
+
+- name: Ensure Promtail service is enabled and running
+  ansible.builtin.systemd:
+    name: "{{ promtail_service_name }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes

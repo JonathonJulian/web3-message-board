@@ -1,0 +1,16 @@
+---
+# Handlers for the logging role
+
+- name: Restart Promtail
+  ansible.builtin.systemd:
+    name: "{{ promtail_service_name }}"
+    state: restarted
+    daemon_reload: yes
+  when: effective_agent == "promtail" or detected_agent == "promtail"
+
+- name: Restart Alloy
+  ansible.builtin.systemd:
+    name: "{{ alloy_service_name | default('alloy') }}"
+    state: restarted
+    daemon_reload: yes
+  when: effective_agent == "alloy" or detected_agent == "alloy" or detected_agent == "both"

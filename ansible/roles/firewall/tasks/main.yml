@@ -1,0 +1,49 @@
+---
+# Install and configure UFW firewall
+
+- name: Install UFW
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+    update_cache: yes
+    cache_valid_time: 3600
+  when: firewall_enabled
+
+- name: Reset UFW to default state
+  community.general.ufw:
+    state: reset
+  when: firewall_enabled
+
+- name: Set default UFW policy
+  community.general.ufw:
+    direction: "{{item.direction}}"
+    policy: "{{item.policy}}"
+  loop:
+    - {direction: 'incoming', policy: "{{firewall_default_policy}}"}
+    - {direction: 'outgoing', policy: 'allow'}
+  when: firewall_enabled
+
+- name: Configure firewall rules
+  community.general.ufw:
+    rule: allow
+    port: '{{item.port}}'
+    proto: "{{item.proto}}"
+  loop: "{{firewall_rules}}"
+  when: firewall_enabled
+
+- name: Enable UFW logging
+  community.general.ufw:
+    logging: on
+  when: firewall_enabled and firewall_enable_logging
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+  when: firewall_enabled
+
+- name: Ensure UFW service is enabled at boot
+  ansible.builtin.systemd:
+    name: ufw
+    enabled: yes
+    state: started
+  when: firewall_enabled

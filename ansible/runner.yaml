@@ -1,0 +1,26 @@
+---
+# Playbook for setting up GitHub Actions runner dependencies
+# This playbook installs all the necessary dependencies for running GitHub workflow jobs
+
+- name: Install GitHub Actions runner dependencies
+  hosts: github_runners
+  become: false
+  gather_facts: true
+  vars:
+    # Override defaults if needed
+    go_version: "1.23"
+    node_version: "20"
+    pnpm_version: "8"
+
+    # Control which dependency sets to install
+    install_go: true
+    install_node: true
+    install_pnpm: true
+    install_ansible: true
+    install_github_cli: true
+
+    # Project root directory
+    project_root: "{{ lookup('env', 'GITHUB_WORKSPACE') | default(ansible_env.PWD) }}"
+
+  roles:
+    - role: github_actions_deps

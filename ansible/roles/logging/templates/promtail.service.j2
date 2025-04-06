@@ -1,0 +1,14 @@
+[Unit]
+Description=Promtail service for shipping logs to Loki
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart={{ promtail_install_dir }}/promtail -config.file={{ promtail_config_file }}
+Restart=always
+RestartSec=10
+WorkingDirectory=/tmp
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,67 @@
+---
+# Install and configure Nginx web server
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  become: true
+  tags: nginx
+
+- name: Install Nginx
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+  become: true
+  tags: nginx
+
+- name: Ensure Nginx service is enabled and running
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: yes
+    state: started
+  become: true
+  tags: nginx
+
+- name: Remove default Nginx site configuration
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  become: true
+  notify: Restart Nginx
+  tags: nginx
+
+- name: Create Nginx configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "/etc/nginx/nginx.conf"
+    owner: root
+    group: root
+    mode: 0644
+  become: true
+  notify: Restart Nginx
+  tags: nginx
+
+- name: Ensure Nginx log directory exists
+  ansible.builtin.file:
+    path: "{{ nginx_log_path }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: 0755
+  become: true
+  tags: nginx
+
+- name: Ensure web content directory exists
+  ansible.builtin.file:
+    path: "{{ nginx_root_dir }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: 0755
+  become: true
+  tags: nginx
+
+# Apply security configurations
+- name: Configure Nginx security
+  include_tasks: security.yml
+  tags: ['nginx', 'security']

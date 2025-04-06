@@ -1,0 +1,75 @@
+---
+# Install and configure Grafana Alloy for log collection
+
+- name: Create Alloy configuration directory
+  ansible.builtin.file:
+    path: "{{ alloy_config_dir | default('/etc/alloy') }}"
+    state: directory
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Set Alloy version if not specified
+  ansible.builtin.set_fact:
+    alloy_version: "{{ alloy_version | default('1.0.1') }}"
+
+- name: Set Alloy install directory if not specified
+  ansible.builtin.set_fact:
+    alloy_install_dir: "{{ alloy_install_dir | default('/usr/local/bin') }}"
+
+- name: Download Alloy binary
+  ansible.builtin.get_url:
+    url: "https://github.com/grafana/alloy/releases/download/v{{ alloy_version }}/alloy-linux-amd64.zip"
+    dest: "/tmp/alloy-{{ alloy_version }}.zip"
+    mode: 0644
+  register: download_result
+
+- name: Install unzip package
+  ansible.builtin.apt:
+    name: unzip
+    state: present
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Extract Alloy binary
+  ansible.builtin.unarchive:
+    src: "/tmp/alloy-{{ alloy_version }}.zip"
+    dest: "/tmp"
+    remote_src: yes
+  when: download_result.changed
+
+- name: Copy Alloy binary to installation directory
+  ansible.builtin.copy:
+    src: "/tmp/alloy-linux-amd64"
+    dest: "{{ alloy_install_dir }}/alloy"
+    mode: 0755
+    remote_src: yes
+  when: download_result.changed
+  notify: Restart Alloy
+
+- name: Create Alloy configuration file
+  ansible.builtin.template:
+    src: alloy-config.yml.j2
+    dest: "{{ alloy_config_file | default('/etc/alloy/alloy.yaml') }}"
+    owner: root
+    group: root
+    mode: 0644
+    lstrip_blocks: true
+    trim_blocks: true
+  notify: Restart Alloy
+
+- name: Create Alloy systemd service file
+  ansible.builtin.template:
+    src: alloy.service.j2
+    dest: /etc/systemd/system/{{ alloy_service_name | default('alloy') }}.service
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart Alloy
+
+- name: Ensure Alloy service is enabled and running
+  ansible.builtin.systemd:
+    name: "{{ alloy_service_name | default('alloy') }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes

@@ -1,0 +1,73 @@
+user www-data;
+worker_processes {{ nginx_worker_processes }};
+pid /run/nginx.pid;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+    worker_connections {{ nginx_worker_connections }};
+    # multi_accept on;
+}
+
+http {
+    # Basic Settings
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout {{ nginx_keepalive_timeout }};
+    types_hash_max_size 2048;
+    server_tokens {% if nginx_server_tokens %}on{% else %}off{% endif %};
+
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    # Logging Settings
+    access_log {{ nginx_access_log }};
+    error_log {{ nginx_error_log }};
+
+    # Gzip Settings
+    gzip {% if nginx_enable_gzip %}on{% else %}off{% endif %};
+    gzip_disable "msie6";
+
+    # Virtual Host Configs - Explicitly disable defaults to avoid conflicts
+    # include /etc/nginx/conf.d/*.conf;
+    # include /etc/nginx/sites-enabled/*;
+
+    server {
+        listen {{ nginx_port }} default_server;
+        listen [::]:{{ nginx_port }} default_server;
+
+        root {{ nginx_root_dir }};
+        index {{ nginx_index_files }};
+
+        server_name {{ nginx_server_name }};
+
+        location / {
+            try_files $uri $uri/ =404;
+        }
+
+{% if nginx_proxy_locations | length > 0 %}
+{% for proxy in nginx_proxy_locations %}
+        # {{ proxy.location }} endpoint
+        location {{ proxy.location }} {
+            proxy_pass {{ proxy.backend_url }};
+            proxy_http_version 1.1;
+{% if proxy.websocket %}
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_read_timeout 86400;
+            proxy_send_timeout 86400;
+            proxy_buffering off;
+{% else %}
+            proxy_set_header Connection 'upgrade';
+{% endif %}
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_cache_bypass $http_upgrade;
+            access_log on;
+        }
+{% endfor %}
+{% endif %}
+    }
+}

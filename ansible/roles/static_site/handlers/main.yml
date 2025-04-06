@@ -1,0 +1,8 @@
+---
+# Handlers for Static Site role
+
+- name: Restart Nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: restarted
+  become: true

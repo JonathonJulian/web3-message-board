@@ -1,0 +1,118 @@
+---
+# Global variables
+
+# GitHub Authentication
+# Debug: Retrieving GITHUB_TOKEN solely from the environment variable.
+github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"  # Token is fetched exclusively from the environment.
+
+# Nginx settings
+nginx_port: 80
+nginx_server_name: "_"
+nginx_log_path: /var/log/nginx
+nginx_access_log: "{{ nginx_log_path }}/access.log"
+nginx_error_log: "{{ nginx_log_path }}/error.log"
+nginx_backend_port: 8080
+nginx_root_dir: "{{ static_site_install_dir }}"
+nginx_index_files: "index.html index.htm"
+nginx_proxy_locations:
+  - location: /api/
+    backend_url: http://localhost:{{ nginx_backend_port }}/api/
+    websocket: false
+
+# Application paths
+static_site_install_dir: /var/www/html
+
+# Firewall settings
+firewall_rules:
+  - port: 22
+    proto: tcp
+    comment: "SSH"
+  - port: 80
+    proto: tcp
+    comment: "HTTP"
+
+# Logging settings
+loki_url: "http://grafana.local/loki/loki/api/v1/push"
+logs:
+  - name: nginx-access
+    path: /var/log/nginx/access.log
+    job: nginx
+    type: access
+
+  - name: nginx-error
+    path: /var/log/nginx/error.log
+    job: nginx
+    type: error
+
+  - name: system
+    path: /var/log/syslog
+    job: system
+    type: syslog
+
+  - name: api
+    path: /var/log/api.log
+    job: api
+    type: application
+
+  - name: frontend
+    path: /var/log/nginx/frontend-access.log
+    job: frontend
+    type: access
+
+# Kubernetes Ingress Host Entries
+k8s_ingress:
+  default_ip: "192.168.1.77"
+  namespace: "monad"
+  resource_name: "monitoring-minio"
+  host_entries:
+    - hostname: "grafana.local"
+      description: "Grafana dashboard"
+    - hostname: "minio.local"
+      description: "MinIO object storage"
+    - hostname: "loki.local"
+      description: "Loki log aggregation"
+
+# Authentication settings
+auth:
+  # Default authentication method: 'ssh_key' or 'password'
+  method: "ssh_key"
+
+# User settings
+users:
+  - name: devops
+    groups: sudo
+    sudoers:
+      privileges: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_key:
+      key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH+ezXPPgGLxRHi82niMyFgizuk6qXTthw4nMzh6HaAm local-deploy@web3-message-board"
+      state: present
+  - name: ubuntu
+    groups: sudo
+    sudoers:
+      privileges: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_key:
+      key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDrV6JpZ+TZOwVf/+tLKBwHaNrWnI00eHiKCI2tJ+6sp github-actions@monad"
+      state: present
+  - name: bob
+    groups: users
+    sudoers:
+      privileges: "NOPASSWD: /sbin/reboot"
+    ssh_key:
+      key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBJUcYxTi0JpfMJlK9ooXl7nmrMUcxOh6RQsgxgNMIeB bob@message-board"
+      state: present
+
+# Go service configuration for API
+service_name: "api"
+service_description: "Web3 Message Board API Service"
+service_github_repo: "JonathonJulian/web3-message-board"
+service_release_version: "v0.0.3"
+service_env_vars:
+  PORT: "8080"
+  MONAD_CONTRACT_ADDRESS: "0xEFD38108dfE2c80f29579E6D692c4009586A3f59"
+  MONAD_RPC_URL: "https://testnet-rpc.monad.xyz"
+
+# Static site configuration
+static_site_name: "frontend"
+static_site_github_repo: "JonathonJulian/web3-message-board"
+static_site_release_version: "v0.0.13"
+static_site_archive_pattern: "frontend-bundle.tar.gz"

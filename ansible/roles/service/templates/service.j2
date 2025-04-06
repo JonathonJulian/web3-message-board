@@ -1,0 +1,18 @@
+[Unit]
+Description={{ service_description }}
+After=network.target
+
+[Service]
+User={{ service_user }}
+Group={{ service_group }}
+WorkingDirectory={{ service_binary_dir }}
+ExecStart={{ service_binary_dir }}/{{ service_name }} {{ service_args }}
+Restart={{ service_restart }}
+StandardOutput=append:{{ service_log_file }}
+StandardError=append:{{ service_log_file }}
+{% for key, value in service_env_vars.items() %}
+Environment="{{ key }}={{ value }}"
+{% endfor %}
+
+[Install]
+WantedBy=multi-user.target

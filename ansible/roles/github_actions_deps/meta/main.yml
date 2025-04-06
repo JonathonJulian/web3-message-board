@@ -1,0 +1,28 @@
+---
+galaxy_info:
+  role_name: github_actions_deps
+  author: web3-message-board team
+  description: Role to install GitHub Actions runner dependencies
+  company: web3-message-board
+  license: MIT
+  min_ansible_version: 2.9
+  platforms:
+    - name: Ubuntu
+      versions:
+        - bionic
+        - focal
+        - jammy
+    - name: Debian
+      versions:
+        - buster
+        - bullseye
+  galaxy_tags:
+    - github
+    - actions
+    - runner
+    - ci
+    - cd
+    - workflow
+    - dependencies
+
+dependencies: []

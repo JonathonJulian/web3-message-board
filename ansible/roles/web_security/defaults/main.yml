@@ -1,0 +1,10 @@
+---
+# Default variables for web security role
+
+# Filesystem security
+security_content_directories:
+  - {path: '/var/www/html', owner: 'www-data', group: 'www-data', mode: '0755'}
+  - {path: '/var/www/uploads', owner: 'www-data', group: 'www-data', mode: '0750'}
+
+# Temporary filesystem mounting
+security_mount_tmp: false

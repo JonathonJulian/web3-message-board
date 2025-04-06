@@ -1,0 +1,31 @@
+# Security Headers Configuration
+# Added by Ansible
+
+# Add security headers to all responses
+map $upstream_http_content_type $add_security_headers {
+    default                     "true";
+    "image/jpeg"                "false";
+    "image/gif"                 "false";
+    "image/png"                 "false";
+    "image/svg+xml"             "false";
+    "image/webp"                "false";
+    "font/woff"                 "false";
+    "font/woff2"                "false";
+    "application/javascript"    "false";
+    "application/x-javascript"  "false";
+    "text/css"                  "false";
+}
+
+# This will apply the security headers to all non-static file responses
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    # Apply security headers globally
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    # CSP policy - adjust as needed for your application
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; media-src 'self'; frame-src 'self'; base-uri 'self'" always;
+}

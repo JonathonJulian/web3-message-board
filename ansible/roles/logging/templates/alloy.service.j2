@@ -1,0 +1,22 @@
+[Unit]
+Description=Grafana Alloy Agent
+Documentation=https://grafana.com/docs/alloy/latest/
+After=network.target
+
+[Service]
+User=root
+ExecStart={{ alloy_install_dir | default('/usr/local/bin') }}/alloy run {{ alloy_config_file | default('/etc/alloy/alloy.yaml') }}
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+LimitNOFILE=65536
+
+{% if alloy_environment_vars is defined %}
+# Environment variables
+{% for name, value in alloy_environment_vars.items() %}
+Environment="{{ name }}={{ value }}"
+{% endfor %}
+{% endif %}
+
+[Install]
+WantedBy=multi-user.target
