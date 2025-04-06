@@ -1,0 +1,180 @@
+{{- /* Disabled in favor of dynamic provisioning
+# Persistent Volumes for Loki
+{{- if .Values.lokistack.enabled}}
+# Loki Chunks PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-loki-chunks
+  labels:
+    app: {{.Release.Name}}-loki
+    component: chunks
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: {{.Values.lokistack.write.persistence.size | default "50Gi"}}
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/loki/chunks
+    type: DirectoryOrCreate
+---
+# Loki Ruler PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-loki-ruler
+  labels:
+    app: {{.Release.Name}}-loki
+    component: ruler
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: {{.Values.lokistack.backend.persistence.size | default "50Gi"}}
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/loki/ruler
+    type: DirectoryOrCreate
+---
+# Loki Index PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-loki-index
+  labels:
+    app: {{.Release.Name}}-loki
+    component: index
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: {{.Values.lokistack.backend.persistence.size | default "50Gi"}}
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/loki/index
+    type: DirectoryOrCreate
+{{- end}}
+
+{{- if .Values.grafana.enabled}}
+---
+# Grafana PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-grafana-data
+  labels:
+    app: {{.Release.Name}}-grafana
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: {{.Values.grafana.persistence.size | default "10Gi"}}
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/grafana
+    type: DirectoryOrCreate
+{{- end}}
+*/ -}}
+
+{{- /* Skip this template if templates.pv is false */}}
+{{- if or (not (hasKey .Values "templates")) (not (hasKey .Values.templates "pv")) (eq .Values.templates.pv true)}}
+
+# Persistent Volume for Minio only
+{{- if .Values.minio.enabled}}
+---
+# Minio PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-minio-pv
+  labels:
+    app: {{.Release.Name}}-minio
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: {{.Values.minio.persistence.size}}
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/minio
+    type: DirectoryOrCreate
+  volumeMode: Filesystem
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - worker0  # Using worker node for storage
+{{- end}}
+
+{{- if .Values.lokiStack.enabled}}
+---
+# Loki PV for Storage
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-loki-pv-50gb
+  labels:
+    app: {{.Release.Name}}-loki
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/loki
+    type: DirectoryOrCreate
+  volumeMode: Filesystem
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - worker0  # Using worker node for storage
+{{- end}}
+
+{{- if and .Values.grafana.enabled .Values.grafana.persistence.enabled}}
+---
+# Grafana PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-grafana-pv
+  labels:
+    app: {{.Release.Name}}-grafana
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: {{.Values.grafana.persistence.size | default "10Gi"}}
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/grafana
+    type: DirectoryOrCreate
+  volumeMode: Filesystem
+  claimRef:
+    namespace: {{.Release.Namespace}}
+    name: {{.Release.Name}}-grafana
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - worker0  # Using worker node for storage
+{{- end}}
+{{- end}}
