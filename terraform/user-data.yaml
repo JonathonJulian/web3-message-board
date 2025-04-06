@@ -1,0 +1,46 @@
+#cloud-config
+hostname: web-server-nginx-cloud-3
+fqdn: web-server-nginx-cloud-3.local
+manage_etc_hosts: true
+ssh_pwauth: false
+
+# Explicitly set datasource and disable cloud-init network configuration
+# so our settings take precedence
+datasource_list: [OVF, NoCloud, None]
+network:
+  version: 2
+  ethernets:
+    ens192:
+      dhcp4: false
+      addresses:
+        - 192.168.1.200/24
+      routes:
+        - to: default
+          via: 192.168.1.1
+      nameservers:
+        addresses: ["8.8.8.8","8.8.4.4"]
+
+users:
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    # Default password is 'ubuntu'
+    passwd: $6$rounds=4096$byY7nrwrTW$KxCgIpT9g8JR89tE49RR6NJ5S0iPxAP31mBMJfIvP4EZDw8blNP7n8L9MRwTpW39SQAxxmQm3WCk1E9qyIqKL1
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO3sOFB9wGEcOgNO5BfxF35Sh+EAOxWTZjx//DK4XHAx jon@blocknative.com
+
+# Force cloud-init to use our configuration
+write_files:
+  - path: /etc/cloud/cloud.cfg.d/99-custom-networking.cfg
+    owner: root:root
+    permissions: '0644'
+    content: |
+      network:
+        config: disabled
+
+package_update: true
+package_upgrade: true
+packages:
+  - python3
+  - openssh-server
