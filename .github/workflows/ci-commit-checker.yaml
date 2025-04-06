@@ -27,21 +27,21 @@ jobs:
           VALID_COMMITS=0
 
           # Conventional commit pattern
-          PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|breaking)(\(.+\))?: .+$"
+          PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|breaking)(\(.+\))?: .+"
 
           # Check each commit
           for COMMIT in $PR_COMMITS; do
             ((TOTAL_COMMITS++))
 
             # Get commit message
-            MESSAGE=$(git log --format="%s" -n 1 $COMMIT)
+            COMMIT_MSG=$(git log --format="%s" -n 1 "$COMMIT")
 
-            # Check if message matches pattern
-            if [[ $MESSAGE =~ $PATTERN ]]; then
+            # Check if message follows conventional format
+            if [[ "$COMMIT_MSG" =~ $PATTERN ]]; then
+              echo "✅ $COMMIT: $COMMIT_MSG"
               ((VALID_COMMITS++))
-              echo "✅ Valid commit message: $MESSAGE"
             else
-              echo "❌ Invalid commit message: $MESSAGE"
+              echo "❌ $COMMIT: $COMMIT_MSG"
               echo "   Commit messages must follow the conventional commit format:"
               echo "   type(scope): description"
               echo "   Example: feat(button): add new color variants"
