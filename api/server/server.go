@@ -81,10 +81,10 @@ func New(version string) *Server {
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"}, // For development; restrict in production
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Accept", "Authorization", "Content-Type"},
-		ExposeHeaders:    []string{"Link"},
+		AllowHeaders:     []string{"Accept", "Authorization", "Content-Type", "X-Requested-With"},
+		ExposeHeaders:    []string{"Link", "Content-Length", "Content-Disposition"},
 		AllowCredentials: true,
-		MaxAge:           300 * time.Second,
+		MaxAge:           120 * time.Second,
 	}))
 
 	rpcServer := rpc.NewSimulatedRPCServer(log)
