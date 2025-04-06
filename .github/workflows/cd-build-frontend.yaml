@@ -12,7 +12,7 @@ on:
       node_version:
         description: 'Node.js version to use'
         required: false
-        default: '18'
+        default: '20'
       image_tag:
         description: 'Version to use for this build'
         required: false
@@ -63,22 +63,6 @@ jobs:
             fi
           fi
 
-          # Determine package manager type
-          if [ -f "frontend/package-lock.json" ]; then
-            echo "::notice::Using npm package manager"
-            PKG_MANAGER="npm"
-          elif [ -f "frontend/yarn.lock" ]; then
-            echo "::notice::Using yarn package manager"
-            PKG_MANAGER="yarn"
-          elif [ -f "frontend/pnpm-lock.yaml" ]; then
-            echo "::notice::Using pnpm package manager"
-            PKG_MANAGER="pnpm"
-          else
-            echo "::warning::No lock file found, defaulting to npm"
-            PKG_MANAGER="npm"
-          fi
-
-          echo "pkg_manager=$PKG_MANAGER" >> $GITHUB_OUTPUT
           echo "✅ Frontend directory validated"
 
       - name: Determine version to use
@@ -130,32 +114,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ inputs.node_version || '18' }}
-
-      # Setup package manager based on what's detected
-      - name: Setup npm cache
-        if: steps.check_frontend.outputs.pkg_manager == 'npm'
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-npm-${{ hashFiles('frontend/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-npm-
+          node-version: ${{ inputs.node_version || '20' }}
 
       - name: Setup pnpm
-        if: steps.check_frontend.outputs.pkg_manager == 'pnpm'
         uses: pnpm/action-setup@v3
         with:
           version: 9.x
 
       - name: Get pnpm store directory
-        if: steps.check_frontend.outputs.pkg_manager == 'pnpm'
+        id: pnpm-cache
         shell: bash
         run: |
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: Setup pnpm cache
-        if: steps.check_frontend.outputs.pkg_manager == 'pnpm'
         uses: actions/cache@v4
         with:
           path: ${{ env.STORE_PATH }}
@@ -163,79 +135,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      - name: Setup yarn cache
-        if: steps.check_frontend.outputs.pkg_manager == 'yarn'
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/yarn
-          key: ${{ runner.os }}-yarn-${{ hashFiles('frontend/yarn.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-yarn-
-
       - name: Install dependencies
         run: |
           cd frontend
-
-          case "${{ steps.check_frontend.outputs.pkg_manager }}" in
-            npm)
-              echo "Installing dependencies with npm"
-              npm ci
-              ;;
-            yarn)
-              echo "Installing dependencies with yarn"
-              yarn install --frozen-lockfile
-              ;;
-            pnpm)
-              echo "Installing dependencies with pnpm"
-              pnpm install --frozen-lockfile
-              ;;
-            *)
-              echo "Using default npm"
-              npm ci
-              ;;
-          esac
+          pnpm install --frozen-lockfile
 
       - name: Update version in package.json
         run: |
           cd frontend
-
-          case "${{ steps.check_frontend.outputs.pkg_manager }}" in
-            npm)
-              npm version ${{ steps.get_version.outputs.version }} --no-git-tag-version
-              ;;
-            yarn)
-              yarn version --new-version ${{ steps.get_version.outputs.version }} --no-git-tag-version
-              ;;
-            pnpm)
-              pnpm version ${{ steps.get_version.outputs.version }} --no-git-tag-version
-              ;;
-            *)
-              npm version ${{ steps.get_version.outputs.version }} --no-git-tag-version
-              ;;
-          esac
+          pnpm version ${{ steps.get_version.outputs.version }} --no-git-tag-version
 
       - name: Build frontend
         run: |
           cd frontend
-
-          case "${{ steps.check_frontend.outputs.pkg_manager }}" in
-            npm)
-              echo "Building with npm"
-              npm run build
-              ;;
-            yarn)
-              echo "Building with yarn"
-              yarn build
-              ;;
-            pnpm)
-              echo "Building with pnpm"
-              pnpm run build
-              ;;
-            *)
-              echo "Building with npm (default)"
-              npm run build
-              ;;
-          esac
+          pnpm run build
 
       - name: Create archive
         run: |
@@ -290,12 +203,6 @@ jobs:
             else
               echo "### 📢 Release Status"
               echo "ℹ️ No separate release will be created (artifacts will be attached to the main release)"
-            fi
-
-            # Print out some useful stats from the build
-            if [ -f "./frontend/dist/stats.html" ]; then
-              echo "### 📊 Build Statistics"
-              echo "Build statistics are available in the stats.html file in the artifact"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
