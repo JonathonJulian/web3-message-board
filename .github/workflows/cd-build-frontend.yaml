@@ -55,26 +55,13 @@ jobs:
             else
               CREATE_RELEASE="true"
             fi
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          else
             # From workflow dispatch
             if [ "${{ github.event.inputs.image_tag }}" != "" ]; then
               VERSION="${{ github.event.inputs.image_tag }}"
             else
               VERSION="dev"
             fi
-            ACTOR="${{ github.actor }}"
-            TAG="frontend-v${VERSION}"
-            CREATE_RELEASE="false"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            # From tag push
-            VERSION="${{ github.ref_name }}"
-            VERSION="${VERSION#v}"
-            ACTOR="${{ github.actor }}"
-            TAG="${{ github.ref_name }}"
-            CREATE_RELEASE="true"
-          else
-            # Default fallback
-            VERSION=$(date +'%Y.%m.%d.%H%M')
             ACTOR="${{ github.actor }}"
             TAG="frontend-v${VERSION}"
             CREATE_RELEASE="false"
@@ -128,8 +115,8 @@ jobs:
       - name: Create archive
         run: |
           cd frontend
-          # Create the tar.gz bundle using the build directory
-          tar -czf ../frontend-bundle.tar.gz build
+          # Create the tar.gz bundle using the dist directory
+          tar -czf ../frontend-bundle.tar.gz dist
 
           # Create artifacts directory
           mkdir -p ../artifacts
@@ -188,13 +175,6 @@ jobs:
           name: frontend-bundle
           path: ./artifacts
 
-      - name: Debug downloaded artifacts
-        run: |
-          echo "Contents of artifacts directory:"
-          ls -la ./artifacts/
-          echo "Current working directory:"
-          pwd
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -219,7 +199,7 @@ jobs:
             ### 📝 Deployment Instructions
             1. Download the frontend bundle
             2. Extract the contents: `tar -xzf frontend-bundle.tar.gz`
-            3. Deploy the extracted `build` folder to your web server
+            3. Deploy the extracted `dist` folder to your web server
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
