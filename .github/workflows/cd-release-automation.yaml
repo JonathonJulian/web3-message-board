@@ -1,6 +1,6 @@
 ---
 name: Release Automation
-run-name: ${{  github.event.inputs.release_type || 'Auto'  }} Release ${{  github.event.inputs.version && format('v{0}', github.event.inputs.version) || '(version to be determined)'  }}
+run-name: ${{ github.event.inputs.release_type || 'Auto' }} Release ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || '(version to be determined)' }}
 
 on:
   push:
@@ -51,118 +51,91 @@ jobs:
   analyze-commits:
     runs-on: ubuntu-latest
     outputs:
-      release_type: ${{  steps.analyze.outputs.release_type  }}
-      has_new_commits: ${{  steps.analyze.outputs.has_new_commits  }}
+      release_type: ${{ steps.analyze.outputs.release_type }}
+      has_new_commits: ${{ steps.analyze.outputs.has_new_commits }}
     if: github.event_name == 'push'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{  github.token  }}
+          token: ${{ github.token }}
 
       - name: Analyze commits for release type
         id: analyze
+        uses: TriPSs/conventional-changelog-action@v3
+        with:
+          github-token: ${{ github.token }}
+          skip-version-file: true
+          skip-git-pull: true
+          skip-commit: true
+          output-file: false
+
+      - name: Set has_new_commits output
+        id: set_outputs
         run: |
-          # Get the latest tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "Latest tag: $LATEST_TAG"
-
-          # Get commit messages since the latest tag
-          COMMITS=$(git log --pretty=format:"%s" $LATEST_TAG..HEAD)
-          COMMIT_COUNT=$(echo "$COMMITS" | grep -v "^$" | wc -l | xargs)
-          echo "Found $COMMIT_COUNT new commits since $LATEST_TAG"
-
-          echo "Commit messages since last tag:"
-          git log --pretty=format:"%h - %s" $LATEST_TAG..HEAD
-
-          if [ "$COMMIT_COUNT" -eq 0 ]; then
-            echo "No new commits found"
+          if [ "${{ steps.analyze.outputs.skipped }}" == "true" ]; then
             echo "has_new_commits=false" >> $GITHUB_OUTPUT
-            exit 0
+          else
+            echo "has_new_commits=true" >> $GITHUB_OUTPUT
+            echo "release_type=${{ steps.analyze.outputs.type }}" >> $GITHUB_OUTPUT
           fi
 
-          echo "has_new_commits=true" >> $GITHUB_OUTPUT
-
-          # Check for breaking changes
-          if echo "$COMMITS" | grep -q -i "BREAKING CHANGE:" || echo "$COMMITS" | grep -q -i "^break:" || echo "$COMMITS" | grep -q -i "^breaking:"; then
-            echo "Major release detected due to breaking changes"
-            echo "release_type=major" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Check for features
-          if echo "$COMMITS" | grep -q -i "^feat:" || echo "$COMMITS" | grep -q -i "^feature:"; then
-            echo "Minor release detected due to new features"
-            echo "release_type=minor" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Default to patch
-          echo "Patch release detected (default for bug fixes, docs, etc.)"
-          echo "release_type=patch" >> $GITHUB_OUTPUT
-
-  # Determine the version to use
+  # Determine and bump the version
   determine-version:
     runs-on: ubuntu-latest
     needs: [analyze-commits]
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'push'
+      (github.event_name == 'push' && needs.analyze-commits.outputs.has_new_commits == 'true')
     outputs:
-      version: ${{  steps.get-version.outputs.version  }}
+      version: ${{ steps.bump-version.outputs.new_version }}
+      tag: ${{ steps.bump-version.outputs.new_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{  github.token  }}
+          token: ${{ github.token }}
 
-      - name: Get version
-        id: get-version
+      # If version is provided directly via input, use it
+      - name: Set manual version
+        id: manual_version
+        if: github.event.inputs.version != ''
         run: |
-          # If version is provided directly, use it
-          if [ "${{  github.event.inputs.version  }}" != "" ]; then
-            VERSION="${{  github.event.inputs.version  }}"
-            echo "Using provided version: $VERSION"
-          else
-            # Otherwise calculate it based on the latest tag
-            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-            echo "Latest tag: $LATEST_TAG"
-
-            # Remove the 'v' prefix if present
-            CURRENT_VERSION="${LATEST_TAG#v}"
-
-            # Default to patch if not otherwise specified
-            RELEASE_TYPE="${{  needs.analyze-commits.outputs.release_type || github.event.inputs.release_type || 'patch'  }}"
-            RELEASE_TYPE=$(echo "$RELEASE_TYPE" | tr '[:upper:]' '[:lower:]')
-
-            # Split the version
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-
-            # Increment version based on release type
-            if [ "$RELEASE_TYPE" == "major" ]; then
-              MAJOR=$((MAJOR + 1))
-              MINOR=0
-              PATCH=0
-            elif [ "$RELEASE_TYPE" == "minor" ]; then
-              MINOR=$((MINOR + 1))
-              PATCH=0
-            else # patch
-              PATCH=$((PATCH + 1))
-            fi
-
-            VERSION="$MAJOR.$MINOR.$PATCH"
-            echo "Calculated new version: $VERSION (using $RELEASE_TYPE bump)"
-          fi
-
+          VERSION="${{ github.event.inputs.version }}"
           # Validate version format
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Error: Version must follow semantic versioning (X.Y.Z)"
             exit 1
           fi
-
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
+      # Otherwise use automatic versioning
+      - name: Bump version and create tag
+        id: bump-version
+        if: github.event.inputs.version == ''
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          github_token: ${{ github.token }}
+          default_bump: ${{ needs.analyze-commits.outputs.release_type || github.event.inputs.release_type || 'patch' }}
+          release_branches: main
+          create_annotated_tag: true
+          tag_prefix: v
+          dry_run: true
+
+      # Use the correct version output
+      - name: Set final version
+        id: set_version
+        run: |
+          if [ "${{ github.event.inputs.version }}" != "" ]; then
+            echo "version=${{ steps.manual_version.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ steps.manual_version.outputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ steps.bump-version.outputs.new_version }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ steps.bump-version.outputs.new_tag }}" >> $GITHUB_OUTPUT
+          fi
 
   # Prepare the release
   prepare:
@@ -170,135 +143,52 @@ jobs:
     needs: [determine-version]
     runs-on: ubuntu-latest
     outputs:
-      version: ${{  needs.determine-version.outputs.version  }}
-      actor: ${{  github.actor  }}
+      version: ${{ needs.determine-version.outputs.version }}
+      tag: ${{ needs.determine-version.outputs.tag }}
+      actor: ${{ github.actor }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{  github.token  }}
-
-      - name: Validate version format
-        run: |
-          VERSION="${{  needs.determine-version.outputs.version  }}"
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Error: Version must follow semantic versioning (X.Y.Z)"
-            exit 1
-          fi
-          echo "Version format is valid: "$VERSION
+          token: ${{ github.token }}
 
       - name: Create release branch
-        run: |
-          VERSION="${{  needs.determine-version.outputs.version  }}"
-          BRANCH="release/v${VERSION}"
-          TIMESTAMP=$(date +%s)
-          UNIQUE_BRANCH="${BRANCH}-${TIMESTAMP}"
+        id: create-branch
+        uses: peterjgrainger/action-create-branch@v2.2.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          branch: "release/v${{ needs.determine-version.outputs.version }}"
 
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: "release/v${{ needs.determine-version.outputs.version }}"
 
-          # Set the token for git operations
-          GITHUB_TOKEN="${{  github.token  }}"
-
-          # Check if branch already exists remotely
-          if git ls-remote --heads origin ${BRANCH} | grep -q ${BRANCH}; then
-            echo "Branch ${BRANCH} already exists remotely. Creating a unique branch name."
-            BRANCH="${UNIQUE_BRANCH}"
-            echo "Using unique branch name: ${BRANCH}"
-            git checkout -b "${BRANCH}"
-          elif git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
-            echo "Branch ${BRANCH} already exists locally. Using existing branch."
-            git checkout "${BRANCH}"
-          else
-            echo "Creating new branch: ${BRANCH}"
-            git checkout -b "${BRANCH}"
-          fi
-
-          # Update version in files
-          echo "Updating version in files to ${VERSION}"
-
-          # Example version update - adjust for your project
-          if [ -f "package.json" ]; then
-            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
-            git add package.json
-          fi
-
-          if [ -f "frontend/package.json" ]; then
-            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" frontend/package.json
-            git add frontend/package.json
-          fi
-
-          if [ -f "api/package.json" ]; then
-            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" api/package.json
-            git add api/package.json
-          fi
-
-          # Commit changes
-          git commit -m "chore: bump version to ${VERSION}" || echo "No changes to commit"
-
-          # Push branch
-          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
-          git push -u origin "${BRANCH}" --force
-
-          # Store the branch name for later steps
-          echo "RELEASE_BRANCH=${BRANCH}" >> $GITHUB_ENV
-
-          echo "Release branch prepared: ${BRANCH}"
+      - name: Update version in package files
+        uses: EndBug/add-and-commit@v9
+        with:
+          add: "**/package.json"
+          author_name: "GitHub Actions"
+          author_email: "actions@github.com"
+          message: "chore: bump version to ${{ needs.determine-version.outputs.version }}"
+          push: true
+          default_author: github_actions
+          pathspec_error_handling: ignore
 
       - name: Generate release notes
-        id: release_notes
-        run: |
-          # Get the latest tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
-
-          if [ "$LATEST_TAG" = "none" ]; then
-            echo "No previous tag found. Generating release notes for all commits."
-            RANGE="HEAD"
-          else
-            echo "Previous tag found: ${LATEST_TAG}"
-            RANGE="${LATEST_TAG}..HEAD"
-          fi
-
-          # Generate release notes
-          echo "## Changes in this release" > release_notes.md
-          echo "" >> release_notes.md
-
-          # Get all commits first
-          ALL_COMMITS=$(git log "${RANGE}" --pretty=format:"%s (%h)")
-
-          # Features section
-          echo "### Features" >> release_notes.md
-          echo "$ALL_COMMITS" | grep -i "^feat" | while read -r line; do
-            echo "* $line" >> release_notes.md
-          done || true
-          echo "" >> release_notes.md
-
-          # Bug fixes section
-          echo "### Bug Fixes" >> release_notes.md
-          echo "$ALL_COMMITS" | grep -i "^fix" | while read -r line; do
-            echo "* $line" >> release_notes.md
-          done || true
-          echo "" >> release_notes.md
-
-          # Other changes section
-          echo "### Other Changes" >> release_notes.md
-          echo "$ALL_COMMITS" | grep -v -E "^feat|^fix" | while read -r line; do
-            echo "* $line" >> release_notes.md
-          done || true
-          echo "" >> release_notes.md
-
-          # Display the generated release notes
-          cat release_notes.md
-
-          # Save release notes for later steps (only if we're not already in the workspace root)
-          if [ "$(pwd)" != "${GITHUB_WORKSPACE}" ]; then
-            echo "Copying release notes to workspace root"
-            cp release_notes.md "${GITHUB_WORKSPACE}/release_notes.md"
-          else
-            echo "Already in workspace root, no need to copy release notes"
-          fi
+        uses: release-drafter/release-drafter@v5
+        with:
+          tag: ${{ needs.determine-version.outputs.tag }}
+          name: "Release ${{ needs.determine-version.outputs.tag }}"
+          version: ${{ needs.determine-version.outputs.version }}
+          disable-autolabeler: true
+          commitish: "release/v${{ needs.determine-version.outputs.version }}"
+          config-name: release-drafter.yml
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   # Trigger component builds
   trigger-builds:
@@ -309,29 +199,25 @@ jobs:
       - name: Trigger API Build
         uses: peter-evans/repository-dispatch@v2
         with:
-          token: ${{  github.token  }}
+          token: ${{ github.token }}
           event-type: start-api-build
-          client-payload: '{"version": "${{  needs.prepare.outputs.version  }}", "actor": "${{  needs.prepare.outputs.actor  }}", "create_release": false}'
+          client-payload: '{"version": "${{ needs.prepare.outputs.version }}", "actor": "${{ needs.prepare.outputs.actor }}", "create_release": false}'
 
       - name: Trigger Frontend Build
         uses: peter-evans/repository-dispatch@v2
         with:
-          token: ${{  github.token  }}
+          token: ${{ github.token }}
           event-type: start-frontend-build
-          client-payload: '{"version": "${{  needs.prepare.outputs.version  }}", "actor": "${{  needs.prepare.outputs.actor  }}", "create_release": false}'
+          client-payload: '{"version": "${{ needs.prepare.outputs.version }}", "actor": "${{ needs.prepare.outputs.actor }}", "create_release": false}'
 
       - name: Build Triggers Summary
-        run: |
-          {
-            echo "## 🚀 Component Build Triggers"
-            echo "### 📦 Triggered Components for v${{  needs.prepare.outputs.version  }}"
-            echo "| Component | Status |"
-            echo "| --- | --- |"
-            echo "| 🖥️ **API** | ✅ Triggered |"
-            echo "| 🌐 **Frontend** | ✅ Triggered |"
-            echo ""
-            echo "All builds will use version ${{  needs.prepare.outputs.version  }}"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: Sibz/github-status-action@v1
+        with:
+          authToken: ${{ github.token }}
+          context: 'Component Builds'
+          description: 'API and Frontend builds triggered'
+          state: 'success'
+          sha: ${{ github.sha }}
 
   # Wait for component builds to complete
   wait-for-builds:
@@ -357,86 +243,50 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{  env.RELEASE_BRANCH || format('release/v{0}', needs.prepare.outputs.version)  }}
-          token: ${{  github.token  }}
+          ref: ${{ format('release/v{0}', needs.prepare.outputs.version) }}
+          token: ${{ github.token }}
 
-      # Download API artifacts if available
-      - name: Download API artifacts
+      # Download all artifacts in one step
+      - name: Download all workflow artifacts
         uses: dawidd6/action-download-artifact@v2
-        continue-on-error: true
         with:
-          workflow: cd-build-api.yaml
           workflow_conclusion: success
-          path: ./artifacts/api
-          skip_unpack: false
-
-      # Download Frontend artifacts if available
-      - name: Download Frontend artifacts
-        uses: dawidd6/action-download-artifact@v2
-        continue-on-error: true
-        with:
-          workflow: cd-build-frontend.yaml
-          workflow_conclusion: success
-          path: ./artifacts/frontend
-          skip_unpack: false
+          if_no_artifact_found: warn
+          path: ./artifacts
+          check_artifacts: true
+          search_artifacts: true
 
       - name: List collected artifacts
         run: |
-          mkdir -p ./artifacts
           echo "Downloaded artifacts:"
           find ./artifacts -type f | sort
 
       - name: Create GitHub Release
-        id: create_release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{  needs.prepare.outputs.version  }}
-          name: Release v${{  needs.prepare.outputs.version  }}
-          body_path: release_notes.md
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: Release ${{ needs.prepare.outputs.tag }}
           draft: false
           prerelease: false
           generate_release_notes: true
           files: |
-            ./artifacts/api/**/*
-            ./artifacts/frontend/**/*
+            ./artifacts/**/*
         env:
-          GITHUB_TOKEN: ${{  github.token  }}
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Generate release summary
-        run: |
-          # Count artifacts for reporting
-          API_COUNT=$(find ./artifacts/api -type f 2>/dev/null | wc -l || echo "0")
-          FRONTEND_COUNT=$(find ./artifacts/frontend -type f 2>/dev/null | wc -l || echo "0")
-          TOTAL_COUNT=$((API_COUNT + FRONTEND_COUNT))
+        uses: peter-evans/create-or-update-comment@v2
+        with:
+          issue-number: 1
+          body: |
+            ## 🚀 Release ${{ needs.prepare.outputs.tag }} is now available
 
-          {
-            echo "## 🚀 GitHub Release Created"
-            echo "| Property | Value |"
-            echo "| --- | --- |"
-            echo "| 🏷️ **Version** | v${{  needs.prepare.outputs.version  }} |"
-            echo "| 👤 **Created by** | @${{  needs.prepare.outputs.actor  }} |"
-            echo -n "| 🔗 **Release URL** | "
-            echo -n "[${{  github.repository  }}/releases/tag/v${{  needs.prepare.outputs.version  }}]"
-            echo "(${{  github.server_url  }}/${{  github.repository  }}/releases/tag/v${{  needs.prepare.outputs.version  }}) |"
+            Version ${{ needs.prepare.outputs.version }} has been released with all components:
 
-            echo "### 📦 Released Artifacts"
-            echo "| Component | Artifacts | Status |"
-            echo "| --- | --- | --- |"
+            - API
+            - Frontend
 
-            if [ "$API_COUNT" -gt 0 ]; then
-              echo "| 🖥️ **API** | $API_COUNT | ✅ Included |"
-            else
-              echo "| 🖥️ **API** | 0 | ⚠️ Missing |"
-            fi
-
-            if [ "$FRONTEND_COUNT" -gt 0 ]; then
-              echo "| 🌐 **Frontend** | $FRONTEND_COUNT | ✅ Included |"
-            else
-              echo "| 🌐 **Frontend** | 0 | ⚠️ Missing |"
-            fi
-
-            echo "| **Total** | $TOTAL_COUNT | |"
-          } >> "$GITHUB_STEP_SUMMARY"
+            [View the release](https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.tag }})
 
   # Deploy artifacts if requested
   deploy:
@@ -451,20 +301,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{  env.RELEASE_BRANCH || format('release/v{0}', needs.prepare.outputs.version)  }}
-          token: ${{  github.token  }}
+          ref: ${{ format('release/v{0}', needs.prepare.outputs.version) }}
+          token: ${{ github.token }}
 
       - name: Deploy to staging
         run: |
-          echo "Deploying version ${{  needs.prepare.outputs.version  }} to staging environment"
+          echo "Deploying version ${{ needs.prepare.outputs.version }} to staging environment"
           # Add your deployment commands here
 
-          {
-            echo "## 🚀 Deployment Summary"
-            echo "| Property | Value |"
-            echo "| --- | --- |"
-            echo "| 🏷️ **Version** | v${{  needs.prepare.outputs.version  }} |"
-            echo "| 🌐 **Environment** | Staging |"
-            echo "| 👤 **Deployed by** | @${{  needs.prepare.outputs.actor  }} |"
-            echo "| 🕒 **Deployment Date** | $(date) |"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Notify deployment
+        uses: peter-evans/create-or-update-comment@v2
+        with:
+          issue-number: 1
+          body: |
+            ## 🚀 Deployment Complete
+
+            Version ${{ needs.prepare.outputs.version }} has been deployed to staging.
