@@ -17,32 +17,6 @@ help:
 	@echo "  docker-push        - Push frontend Docker image to registry"
 	@echo "  docker-build-multi - Build multi-platform Docker image"
 
-# Frontend Development Commands
-.PHONY: frontend-install
-frontend-install:
-	@echo "Installing frontend dependencies..."
-	cd frontend && pnpm install
-
-.PHONY: frontend-dev
-frontend-dev:
-	@echo "Starting frontend development server..."
-	cd frontend && pnpm run dev
-
-.PHONY: frontend-build
-frontend-build:
-	@echo "Building frontend for production..."
-	cd frontend && pnpm run build
-
-.PHONY: frontend-lint
-frontend-lint:
-	@echo "Linting frontend code..."
-	cd frontend && pnpm run lint
-
-.PHONY: frontend-format
-frontend-format:
-	@echo "Formatting frontend code..."
-	cd frontend && pnpm run format
-
 # Docker Commands
 .PHONY: docker-build
 docker-build:
