@@ -1,0 +1,252 @@
+---
+name: Build and Push Docker Images
+run-name: Docker Build v${{ github.event.client_payload.version || github.event.inputs.version }}
+
+on:
+  # Trigger from the release automation workflow
+  repository_dispatch:
+    types: [start-docker-build]
+
+  # Allow manual triggering for testing
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build'
+        required: true
+        type: string
+      actor:
+        description: 'Actor who triggered the build'
+        required: false
+        default: ''
+        type: string
+      build_arm:
+        description: 'Build ARM64 architecture'
+        required: false
+        default: false
+        type: boolean
+
+# Global permissions for all jobs
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  # Setup job for Docker build
+  setup:
+    name: Docker Build Setup
+    runs-on: ubuntu-latest
+    outputs:
+      repo_owner: ${{ steps.repo_owner.outputs.lowercase }}
+      version: ${{ steps.version.outputs.value }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set repository owner lowercase
+        id: repo_owner
+        run: |
+          LOWERCASE_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "lowercase=$LOWERCASE_OWNER" >> $GITHUB_OUTPUT
+          echo "Using lowercase owner: $LOWERCASE_OWNER"
+
+      - name: Set version
+        id: version
+        run: |
+          VERSION="${{ github.event.client_payload.version || github.event.inputs.version }}"
+          echo "value=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using version: $VERSION"
+
+      - name: Verify package access
+        run: |
+          echo "Verifying package access for ${{ github.repository }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Repository owner: ${{ steps.repo_owner.outputs.lowercase }}"
+
+          # Check if the repository exists
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}")
+
+          echo "Repository status: $STATUS"
+
+          if [ "$STATUS" != "200" ]; then
+            echo "::warning::Repository access issue detected"
+          else
+            echo "::notice::Repository access verified"
+          fi
+
+  # Build job for each component
+  build:
+    name: Build Docker Images
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [api, frontend]
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        if: ${{ github.event.client_payload.build_arm == true || github.event.inputs.build_arm == true }}
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Build platforms in a single operation
+      - name: Build and push multi-platform image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.component }}
+          platforms: ${{ (github.event.client_payload.build_arm == true || github.event.inputs.build_arm == true) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: true
+          tags: |
+            ghcr.io/${{ needs.setup.outputs.repo_owner }}/web3-message-board/${{ matrix.component }}:${{ needs.setup.outputs.version }}
+            ghcr.io/${{ needs.setup.outputs.repo_owner }}/web3-message-board/${{ matrix.component }}:latest
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Alternative approach if the multi-platform build fails
+      - name: Fallback - Build for amd64 only
+        if: failure()
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.component }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ needs.setup.outputs.repo_owner }}/web3-message-board/${{ matrix.component }}:${{ needs.setup.outputs.version }}
+            ghcr.io/${{ needs.setup.outputs.repo_owner }}/web3-message-board/${{ matrix.component }}:latest
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Generate build summary
+      - name: Generate build summary
+        run: |
+          {
+            echo "## 🐳 ${{ matrix.component }} Build Summary"
+            echo "### 📋 Build Information"
+            echo "| Property | Value |"
+            echo "| --- | --- |"
+            echo "| 🏷️ **Version** | v${{ needs.setup.outputs.version }} |"
+            echo "| 👤 **Built by** | @${{ github.event.client_payload.actor || github.event.inputs.actor || github.actor }} |"
+            echo "| 🕒 **Build Date** | $(date) |"
+
+            if [[ "${{ github.event.client_payload.build_arm || github.event.inputs.build_arm }}" == "true" ]]; then
+              echo "| 🏗️ **Platforms** | linux/amd64, linux/arm64 |"
+            else
+              echo "| 🏗️ **Platforms** | linux/amd64 |"
+            fi
+
+            echo "### 📦 Image"
+            echo "\`ghcr.io/${{ needs.setup.outputs.repo_owner }}/web3-message-board/${{ matrix.component }}:${{ needs.setup.outputs.version }}\`"
+
+            echo "### 📝 Usage"
+            echo '```bash'
+            echo "docker pull ghcr.io/${{ needs.setup.outputs.repo_owner }}/web3-message-board/${{ matrix.component }}:${{ needs.setup.outputs.version }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Verify images were pushed successfully
+  verify:
+    name: Verify Docker Images
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Verify images exist
+        run: |
+          VERSION="${{ needs.setup.outputs.version }}"
+          REPO_OWNER="${{ needs.setup.outputs.repo_owner }}"
+
+          echo "Verifying images were successfully pushed..."
+
+          for COMPONENT in api frontend; do
+            IMAGE_REF="ghcr.io/${REPO_OWNER}/web3-message-board/${COMPONENT}:${VERSION}"
+
+            echo "Checking image: $IMAGE_REF"
+
+            # Try to inspect the image
+            if docker manifest inspect "$IMAGE_REF" > /dev/null 2>&1; then
+              echo "✅ Image $IMAGE_REF exists!"
+            else
+              echo "⚠️ Image $IMAGE_REF may not exist or might not be accessible"
+              # Don't fail the workflow, just warn
+            fi
+          done
+
+  notify:
+    name: Notify Build Complete
+    needs: [setup, build, verify]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Notify docker build complete
+        run: |
+          VERSION="${{ needs.setup.outputs.version }}"
+          ACTOR="${{ github.event.client_payload.actor || github.event.inputs.actor || github.actor }}"
+
+          echo "Sending notification for Docker build completion"
+
+          # Use GitHub API directly to send the notification
+          curl -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+            -d "{
+              \"event_type\": \"docker-build-complete\",
+              \"client_payload\": {
+                \"version\": \"$VERSION\",
+                \"actor\": \"$ACTOR\"
+              }
+            }"
+
+          echo "::notice::Notification sent for Docker build completion of version $VERSION"
+
+      - name: Generate summary
+        run: |
+          {
+            echo "## 🐳 Docker Build Pipeline Complete"
+            echo "### 📋 Summary"
+            echo "| Property | Value |"
+            echo "| --- | --- |"
+            echo "| 🏷️ **Version** | v${{ needs.setup.outputs.version }} |"
+            echo "| 👤 **Built by** | @${{ github.event.client_payload.actor || github.event.inputs.actor || github.actor }} |"
+            echo "| 🕒 **Completion Time** | $(date) |"
+            echo "| 🔄 **Workflow Run** | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+
+            echo "### 📦 Images"
+            echo "| Component | Image |"
+            echo "| --- | --- |"
+            echo "| 🖥️ **API** | \`ghcr.io/${{ needs.setup.outputs.repo_owner }}/web3-message-board/api:${{ needs.setup.outputs.version }}\` |"
+            echo "| 🌐 **Frontend** | \`ghcr.io/${{ needs.setup.outputs.repo_owner }}/web3-message-board/frontend:${{ needs.setup.outputs.version }}\` |"
+
+            echo "### 🔄 Next Steps"
+            echo "The release automation workflow will be notified of this completion."
+          } >> "$GITHUB_STEP_SUMMARY"

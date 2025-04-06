@@ -1,0 +1,299 @@
+---
+name: Build and release API Binary
+run-name: API Build ${{ github.event_name == 'repository_dispatch' && format('v{0}', github.event.client_payload.version) || github.event.inputs.image_tag != '' && format('v{0}', github.event.inputs.image_tag) || startsWith(github.ref, 'refs/tags/') && github.ref_name || github.ref == 'refs/heads/main' && 'from main' || 'PR build' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      go_version:
+        description: 'Go version to use'
+        required: false
+        default: '1.21'
+      image_tag:
+        description: 'Version to use for this release (without v prefix)'
+        required: false
+        default: ''
+        type: string
+      build_arm:
+        description: 'Build for ARM64 architecture'
+        required: false
+        default: false
+        type: boolean
+      create_release:
+        description: 'Create a GitHub release'
+        required: false
+        default: false
+        type: boolean
+  repository_dispatch:
+    types: [start-api-build]
+
+jobs:
+  build-api:
+    name: Build API Binary
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      actor: ${{ steps.get_version.outputs.actor }}
+      create_release: ${{ steps.get_version.outputs.create_release }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check API directory
+        id: check_api
+        run: |
+          # Check if api directory exists
+          if [ ! -d "api" ]; then
+            echo "::warning::API directory not found in root folder"
+
+            # Check possible locations
+            if [ -d "src/api" ]; then
+              echo "::notice::Found API in src/api, creating symlink"
+              ln -s src/api api
+            elif [ -d "backend" ]; then
+              echo "::notice::Found backend directory, using it as API"
+              ln -s backend api
+            else
+              echo "::error::Could not find API directory"
+              exit 1
+            fi
+          fi
+
+          # Check for cmd directory
+          if [ -d "api/cmd" ]; then
+            echo "::notice::Found cmd directory"
+            echo "cmd_dir=api/cmd" >> $GITHUB_OUTPUT
+          elif [ -d "api/src" ]; then
+            echo "::notice::Found src directory"
+            echo "cmd_dir=api/src" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::Using api directory as command dir"
+            echo "cmd_dir=api" >> $GITHUB_OUTPUT
+          fi
+
+          # Look for main.go to determine the build directory
+          if [ -f "api/main.go" ]; then
+            echo "::notice::Found main.go in api root"
+            echo "build_dir=api" >> $GITHUB_OUTPUT
+          elif [ -f "api/cmd/main.go" ]; then
+            echo "::notice::Found main.go in api/cmd"
+            echo "build_dir=api/cmd" >> $GITHUB_OUTPUT
+          elif [ -f "api/src/main.go" ]; then
+            echo "::notice::Found main.go in api/src"
+            echo "build_dir=api/src" >> $GITHUB_OUTPUT
+          else
+            # Try to find main.go in any subdirectory
+            MAIN_GO_PATH=$(find api -name "main.go" | head -n 1)
+            if [ -n "$MAIN_GO_PATH" ]; then
+              MAIN_DIR=$(dirname "$MAIN_GO_PATH")
+              echo "::notice::Found main.go in $MAIN_DIR"
+              echo "build_dir=$MAIN_DIR" >> $GITHUB_OUTPUT
+            else
+              echo "::error::Could not find main.go in API directory"
+              find api -type f -name "*.go" | head -n 10
+              exit 1
+            fi
+          fi
+
+          echo "✅ API directory validated"
+
+      - name: Determine version to use
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            # From repository dispatch
+            echo "version=${{ github.event.client_payload.version }}" >> $GITHUB_OUTPUT
+            echo "actor=${{ github.event.client_payload.actor }}" >> $GITHUB_OUTPUT
+
+            # Check if create_release was explicitly set to false in client payload
+            if [ "${{ github.event.client_payload.create_release }}" = "false" ]; then
+              CREATE_RELEASE="false"
+            else
+              CREATE_RELEASE="true"
+            fi
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # From workflow dispatch
+            if [ "${{ github.event.inputs.image_tag }}" != "" ]; then
+              echo "version=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+            else
+              echo "version=dev" >> $GITHUB_OUTPUT
+            fi
+            echo "actor=${{ github.actor }}" >> $GITHUB_OUTPUT
+
+            # Use the input parameter
+            CREATE_RELEASE="${{ github.event.inputs.create_release }}"
+          else
+            # Default fallback
+            echo "version=dev" >> $GITHUB_OUTPUT
+            echo "actor=${{ github.actor }}" >> $GITHUB_OUTPUT
+            CREATE_RELEASE="false"
+          fi
+
+          echo "create_release=$CREATE_RELEASE" >> $GITHUB_OUTPUT
+          echo "Building version: $(cat $GITHUB_OUTPUT | grep version | cut -d= -f2)"
+          echo "Create release: $(cat $GITHUB_OUTPUT | grep create_release | cut -d= -f2)"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go_version || '1.21' }}
+          cache: true
+          cache-dependency-path: api/go.sum
+
+      - name: Get dependencies
+        working-directory: ${{ steps.check_api.outputs.cmd_dir }}
+        run: go mod download
+
+      - name: Build API binaries
+        working-directory: ${{ steps.check_api.outputs.build_dir }}
+        run: |
+          echo "Building API binaries..."
+          VERSION="${{ steps.get_version.outputs.version }}"
+
+          mkdir -p ../bin
+
+          # Create all binaries
+          echo "Building Linux amd64 binary..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -ldflags="-X main.Version=${VERSION}" -o ../bin/api-linux-amd64 .
+
+          echo "Building macOS amd64 binary..."
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -v -ldflags="-X main.Version=${VERSION}" -o ../bin/api-darwin-amd64 .
+
+          echo "Building macOS arm64 binary..."
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -v -ldflags="-X main.Version=${VERSION}" -o ../bin/api-darwin-arm64 .
+
+          # Optional Windows binary
+          if [ "${{ inputs.build_arm }}" = "true" ]; then
+            echo "Building Windows amd64 binary..."
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -v -ldflags="-X main.Version=${VERSION}" -o ../bin/api-windows-amd64.exe .
+          fi
+
+          # Create artifacts directory
+          mkdir -p ../../artifacts/api
+          cp ../bin/api-* ../../artifacts/api/
+
+          echo "API binaries built successfully!"
+          ls -la ../bin/
+
+      - name: Generate build summary
+        run: |
+          # Get file sizes for better reporting
+          LINUX_SIZE=$(du -h artifacts/api/api-linux-amd64 | cut -f1)
+          DARWIN_AMD64_SIZE=$(du -h artifacts/api/api-darwin-amd64 | cut -f1)
+          DARWIN_ARM64_SIZE=$(du -h artifacts/api/api-darwin-arm64 | cut -f1)
+
+          # Write to GitHub step summary
+          {
+            echo "## 🚀 API Build Summary"
+            echo "### 📋 Build Information"
+            echo "| Property | Value |"
+            echo "| --- | --- |"
+            echo "| 🏷️ **Version** | v${{ steps.get_version.outputs.version }} |"
+            echo "| 👤 **Built by** | @${{ steps.get_version.outputs.actor || github.actor }} |"
+            echo "| 🕒 **Build Date** | $(date) |"
+            echo "| 🔄 **Workflow Run** | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo "| 🔀 **Triggered by** | ${{ github.event_name }} |"
+
+            echo "### 📦 Build Artifacts"
+            echo "| Platform | Architecture | Size | Status |"
+            echo "| --- | --- | --- | --- |"
+            echo "| 🐧 Linux | amd64 | ${LINUX_SIZE} | ✅ Success |"
+            echo "| 🍎 macOS | amd64 (Intel) | ${DARWIN_AMD64_SIZE} | ✅ Success |"
+            echo "| 🍎 macOS | arm64 (Apple Silicon) | ${DARWIN_ARM64_SIZE} | ✅ Success |"
+
+            if [ -f "artifacts/api/api-windows-amd64.exe" ]; then
+              WINDOWS_SIZE=$(du -h artifacts/api/api-windows-amd64.exe | cut -f1)
+              echo "| 🪟 Windows | amd64 | ${WINDOWS_SIZE} | ✅ Success |"
+            fi
+
+            if [ "${{ steps.get_version.outputs.create_release }}" = "true" ]; then
+              echo "### 📢 Release Status"
+              echo "✅ A GitHub release will be created with tag **v${{ steps.get_version.outputs.version }}**"
+            else
+              echo "### 📢 Release Status"
+              echo "ℹ️ No separate release will be created (artifacts will be attached to the main release)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-binaries
+          path: artifacts/api/
+          retention-days: 5
+
+  create-release:
+    name: Create API Release
+    needs: build-api
+    if: needs.build-api.outputs.create_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: api-binaries
+          path: ./artifacts
+
+      - name: Debug downloaded artifacts
+        run: |
+          echo "Contents of artifacts directory:"
+          ls -la ./artifacts/
+          echo "Current working directory:"
+          pwd
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.build-api.outputs.version }}
+          name: API Release v${{ needs.build-api.outputs.version }}
+          files: |
+            ./artifacts/api-linux-amd64
+            ./artifacts/api-darwin-amd64
+            ./artifacts/api-darwin-arm64
+            ./artifacts/api-windows-amd64.exe
+          body: |
+            ## 🚀 API Release v${{ needs.build-api.outputs.version }}
+
+            ### 📋 Release Information
+            | Property | Value |
+            | --- | --- |
+            | 🏷️ **Version** | v${{ needs.build-api.outputs.version }} |
+            | 👤 **Built by** | @${{ needs.build-api.outputs.actor || github.actor }} |
+            | 🕒 **Release Date** | $(date) |
+            | 🔄 **Workflow Run** | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            ### 📦 Included Artifacts
+            - **🐧 Linux (amd64)**: `api-linux-amd64`
+            - **🍎 macOS Intel (amd64)**: `api-darwin-amd64`
+            - **🍎 macOS Apple Silicon (arm64)**: `api-darwin-arm64`
+            - **🪟 Windows (amd64)**: `api-windows-amd64.exe` (if available)
+
+            ### 📝 Usage Instructions
+            1. Download the appropriate binary for your platform
+            2. Make it executable: `chmod +x api-*` (Linux/macOS only)
+            3. Run it: `./api-*`
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Generate release summary
+        if: success()
+        run: |
+          {
+            echo "## 🚀 API Release Created"
+            echo "### 📋 Release Information"
+            echo "| Property | Value |"
+            echo "| --- | --- |"
+            echo "| 🏷️ **Version** | v${{ needs.build-api.outputs.version }} |"
+            echo "| 👤 **Published by** | @${{ needs.build-api.outputs.actor || github.actor }} |"
+            echo "| 🔗 **Release URL** | [${{ github.repository }}/releases/tag/v${{ needs.build-api.outputs.version }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ needs.build-api.outputs.version }}) |"
+            echo "| 📦 **Artifacts** | 3+ binaries attached |"
+          } >> "$GITHUB_STEP_SUMMARY"
