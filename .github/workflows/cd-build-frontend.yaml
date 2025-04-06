@@ -4,6 +4,9 @@ name: Build Frontend
 run-name: Frontend Build ${{ github.event_name == 'repository_dispatch' && format('v{0}', github.event.client_payload.version) || github.event.inputs.image_tag != '' && format('v{0}', github.event.inputs.image_tag) || startsWith(github.ref, 'refs/tags/') && github.ref_name || github.ref == 'refs/heads/main' && 'from main' || 'PR build' }}
 
 on:
+  push:
+    branches:
+      - feat/frontend
   workflow_dispatch:
     inputs:
       node_version:
@@ -15,18 +18,12 @@ on:
         required: false
         default: ''
         type: string
-      build_arm:
-        description: 'Build for ARM64 architecture (ignored for frontend, static content is platform-independent)'
-        required: false
-        default: false
-        type: boolean
   repository_dispatch:
     types: [start-frontend-build]
 
 jobs:
   build-frontend:
     name: Build Frontend
-    # Static HTML/JS doesn't need architecture-specific builds
     runs-on: ubuntu-latest
     permissions:
       contents: write
