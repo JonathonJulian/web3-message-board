@@ -1,0 +1,61 @@
+---
+name: Commit Message Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-commit-message:
+    name: Check Commit Message Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Conventional Commits
+        run: |
+          echo "Checking commit messages against conventional commit standard..."
+
+          # Get all commits in this PR
+          PR_COMMITS=$(git log --format="%H" origin/main..HEAD)
+
+          # Initialize counters
+          TOTAL_COMMITS=0
+          VALID_COMMITS=0
+
+          # Conventional commit pattern
+          PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|breaking)(\(.+\))?: .+$"
+
+          # Check each commit
+          for COMMIT in $PR_COMMITS; do
+            ((TOTAL_COMMITS++))
+
+            # Get commit message
+            MESSAGE=$(git log --format="%s" -n 1 $COMMIT)
+
+            # Check if message matches pattern
+            if [[ $MESSAGE =~ $PATTERN ]]; then
+              ((VALID_COMMITS++))
+              echo "✅ Valid commit message: $MESSAGE"
+            else
+              echo "❌ Invalid commit message: $MESSAGE"
+              echo "   Commit messages must follow the conventional commit format:"
+              echo "   type(scope): description"
+              echo "   Example: feat(button): add new color variants"
+              echo "   Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert, breaking"
+            fi
+          done
+
+          # Summary
+          echo "Results: $VALID_COMMITS/$TOTAL_COMMITS commits follow conventional format"
+
+          # Fail if any commit doesn't follow the pattern
+          if [ $VALID_COMMITS -ne $TOTAL_COMMITS ]; then
+            echo "Error: Some commits don't follow conventional commit format. Please fix them."
+            exit 1
+          else
+            echo "Success! All commits follow conventional commit format."
+          fi
