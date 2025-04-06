@@ -40,31 +40,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check Frontend directory
-        id: check_frontend
-        run: |
-          # Check if frontend directory exists
-          if [ ! -d "frontend" ]; then
-            echo "::warning::Frontend directory not found in root folder"
-
-            # Check possible locations
-            if [ -d "src/frontend" ]; then
-              echo "::notice::Found Frontend in src/frontend, creating symlink"
-              ln -s src/frontend frontend
-            elif [ -d "client" ]; then
-              echo "::notice::Found client directory, using it as Frontend"
-              ln -s client frontend
-            elif [ -d "ui" ]; then
-              echo "::notice::Found ui directory, using it as Frontend"
-              ln -s ui frontend
-            else
-              echo "::error::Could not find Frontend directory"
-              exit 1
-            fi
-          fi
-
-          echo "✅ Frontend directory validated"
-
       - name: Determine version to use
         id: get_version
         run: |
@@ -153,23 +128,8 @@ jobs:
       - name: Create archive
         run: |
           cd frontend
-          # Determine the build output directory
-          if [ -d "dist" ]; then
-            BUILD_DIR="dist"
-          elif [ -d "build" ]; then
-            BUILD_DIR="build"
-          elif [ -d "out" ]; then
-            BUILD_DIR="out"
-          else
-            echo "::error::Could not find build output directory"
-            find . -type d -maxdepth 2 | sort
-            exit 1
-          fi
-
-          echo "Using build directory: $BUILD_DIR"
-
-          # Create the tar.gz bundle
-          tar -czf ../frontend-bundle.tar.gz $BUILD_DIR
+          # Create the tar.gz bundle using the build directory
+          tar -czf ../frontend-bundle.tar.gz build
 
           # Create artifacts directory
           mkdir -p ../artifacts
@@ -259,7 +219,7 @@ jobs:
             ### 📝 Deployment Instructions
             1. Download the frontend bundle
             2. Extract the contents: `tar -xzf frontend-bundle.tar.gz`
-            3. Deploy the extracted `dist` folder to your web server
+            3. Deploy the extracted `build` folder to your web server
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
