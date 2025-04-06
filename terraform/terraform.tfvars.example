@@ -1,0 +1,40 @@
+# vCenter connection details
+vsphere_user     = "administrator@vsphere.local"
+vsphere_password = "password123"
+vsphere_server   = "192.168.1.100"
+
+# vSphere infrastructure details
+datacenter = "DC0"
+datastore  = "SSD"
+cluster    = "LabCluster"
+esxi_host  = "192.168.1.67"  # ESXi host IP address
+network    = "VM Network"
+
+# VM configurations
+vm_configs = {
+  "runner" = {
+    name = "github-runner-1"
+    ip   = "192.168.1.95"
+  },
+  "web" = {
+    name = "web-server-nginx"
+    ip   = "192.168.1.94"
+  }
+}
+
+# Common VM settings (these will apply to all VMs)
+vm_cpu       = 2
+vm_memory    = 4096  # 4 GB RAM
+vm_disk_size = 40    # 40 GB
+
+# Network configuration
+vm_domain   = "local"
+vm_netmask  = 24
+vm_gateway  = "192.168.1.1"
+dns_servers = ["8.8.8.8", "8.8.4.4"]
+
+# Authentication
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO3sOFB9wGEcOgNO5BfxF35Sh+EAOxWTZjx//DK4XHAx jon@blocknative.com"
+
+# OVA file details
+ova_file_path = "./ubuntu-cloud.ova"
