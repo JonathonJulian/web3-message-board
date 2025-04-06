@@ -1,0 +1,27 @@
+# Managed by Ansible - {{ ansible_managed }}
+
+# API logs
+/var/log/api.log {
+    daily
+    missingok
+    rotate 7
+    compress
+    delaycompress
+    notifempty
+    create 0640 ubuntu adm
+    sharedscripts
+    postrotate
+        systemctl reload-or-restart api.service
+    endscript
+}
+
+# System application logs
+/var/log/app/*.log {
+    daily
+    missingok
+    rotate 7
+    compress
+    delaycompress
+    notifempty
+    create 0640 ubuntu adm
+}

@@ -1,0 +1,18 @@
+---
+sudoers_dir: /etc/sudoers.d
+
+# Example users configuration - this should be overridden in the playbook variables
+users:
+  - name: admin
+    groups: sudo
+    sudoers:
+      privileges: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_key:
+      key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO3sOFB9wGEcOgNO5BfxF35Sh+EAOxWTZjx//DK4XHAx example@key.com"
+      state: present
+
+  - name: user1
+    groups: users
+    sudoers:
+      privileges: "NOPASSWD: /sbin/reboot"
+    ssh_key: null  # No SSH key for this user

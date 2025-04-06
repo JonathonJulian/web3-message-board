@@ -1,0 +1,20 @@
+---
+# Default variables for hosts role
+
+# Default ingress IP if k8s lookup fails
+default_ingress_ip: "192.168.1.77"
+
+# Kubernetes namespace where ingress is located
+k8s_namespace: "monad"
+
+# Ingress resource name to lookup for IP
+ingress_resource_name: "monitoring-minio"
+
+# Host entries to add to /etc/hosts
+host_entries:
+  - hostname: "grafana.local"
+    description: "Grafana dashboard"
+  - hostname: "minio.local"
+    description: "MinIO object storage"
+  - hostname: "loki.local"
+    description: "Loki log aggregation"

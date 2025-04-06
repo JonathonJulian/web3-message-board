@@ -1,0 +1,12 @@
+---
+# Handlers for UFW firewall
+
+- name: Restart UFW
+  ansible.builtin.systemd:
+    name: ufw
+    state: restarted
+    daemon_reload: yes
+
+- name: Reload UFW
+  ansible.builtin.command: ufw reload
+  when: firewall_use_ufw

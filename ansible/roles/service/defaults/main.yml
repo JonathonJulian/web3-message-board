@@ -1,0 +1,26 @@
+---
+# Default variables for the service role
+service_name: "api"
+service_description: "API Service"
+service_user: "ubuntu"
+service_group: "ubuntu"
+service_port: 8080
+service_restart: "always"
+service_binary_dir: "/usr/local/bin"
+service_log_file: "/var/log/{{ service_name }}.log"
+service_github_repo: "organization/repo"
+service_release_version: "latest"
+service_binary_name: "{{ service_name }}"
+service_args: ""
+service_env_vars:
+  PORT: "8080"
+  LOG_LEVEL: "info"
+
+# Health check settings
+service_health_enabled: true
+service_health_endpoint: "/health"
+service_health_retries: 3
+service_health_delay: 5  # seconds
+
+# Binary verification settings
+service_verify_binary: true

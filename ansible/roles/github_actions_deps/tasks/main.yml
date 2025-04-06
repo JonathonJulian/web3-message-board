@@ -1,0 +1,259 @@
+---
+# Tasks for installing GitHub Actions runner dependencies
+
+- name: Check for macOS
+  set_fact:
+    is_macos: "{{ ansible_distribution == 'MacOSX' }}"
+
+- name: Check if we have sudo access
+  command: "sudo -n true"
+  register: sudo_access
+  changed_when: false
+  ignore_errors: true
+
+# Skip system-level installations on macOS or without sudo
+- name: Skip system installations message
+  debug:
+    msg: "Skipping system-level installations (running on macOS or no sudo access)"
+  when: is_macos | bool or sudo_access.rc != 0
+
+# System tasks are skipped on macOS or without sudo
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  become: true
+  when: ansible_os_family == "Debian" and not (is_macos | bool) and sudo_access.rc == 0
+
+- name: Install common system dependencies
+  package:
+    name:
+      - make
+      - git
+      - curl
+      - wget
+      - gnupg
+      - ca-certificates
+      - python3-pip
+      - python3-venv
+      - lsb-release
+    state: present
+  become: true
+  when: not (is_macos | bool) and sudo_access.rc == 0
+
+# System GitHub CLI tasks are skipped on macOS or without sudo
+- name: Install GitHub CLI (system-level)
+  block:
+    - name: Add GitHub CLI apt key (Debian/Ubuntu)
+      apt_key:
+        url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+        state: present
+        keyring: /usr/share/keyrings/githubcli-archive-keyring.gpg
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Add GitHub CLI repository (Debian/Ubuntu)
+      apt_repository:
+        repo: "deb [arch={{ ansible_architecture }} signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+        state: present
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Install GitHub CLI (Debian/Ubuntu)
+      apt:
+        name: gh
+        state: present
+        update_cache: yes
+      become: true
+      when: ansible_os_family == "Debian"
+  when: install_github_cli | bool and not (is_macos | bool) and sudo_access.rc == 0
+
+# System Go tasks are skipped on macOS or without sudo
+- name: Set up Go (system-level)
+  block:
+    - name: Download Go installer
+      get_url:
+        url: "https://go.dev/dl/go{{ go_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/go{{ go_version }}.linux-amd64.tar.gz"
+        mode: '0644'
+      when: ansible_system == "Linux" and ansible_architecture == "x86_64"
+
+    - name: Remove old Go installation if exists
+      file:
+        path: "{{ go_install_dir }}"
+        state: absent
+      become: true
+
+    - name: Extract Go tarball
+      unarchive:
+        src: "/tmp/go{{ go_version }}.linux-amd64.tar.gz"
+        dest: "/usr/local"
+        remote_src: yes
+      become: true
+      when: ansible_system == "Linux" and ansible_architecture == "x86_64"
+
+    - name: Add Go to system PATH
+      lineinfile:
+        path: /etc/profile.d/go.sh
+        line: 'export PATH=$PATH:{{ go_install_dir }}/bin'
+        create: yes
+        mode: '0644'
+      become: true
+  when: install_go | bool and not (is_macos | bool) and sudo_access.rc == 0
+
+# System Node.js tasks are skipped on macOS or without sudo
+- name: Set up Node.js (system-level)
+  block:
+    - name: Install Node.js repository key
+      apt_key:
+        url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+        state: present
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Add Node.js repository
+      apt_repository:
+        repo: "deb https://deb.nodesource.com/node_{{ node_version }}.x {{ ansible_distribution_release }} main"
+        state: present
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Install Node.js
+      package:
+        name: nodejs
+        state: present
+      become: true
+  when: install_node | bool and not (is_macos | bool) and sudo_access.rc == 0
+
+# These tasks can run without sudo
+- name: Install pnpm (user-level)
+  block:
+    - name: Download pnpm installer
+      shell: curl -fsSL https://get.pnpm.io/install.sh | sh -
+      args:
+        creates: "{{ ansible_env.HOME }}/.pnpm"
+
+    - name: Add pnpm to user PATH
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: 'export PATH=$PATH:{{ ansible_env.HOME }}/.local/share/pnpm'
+        state: present
+        create: yes
+  when: install_pnpm | bool and install_node | bool
+
+# Set up Python virtual environment for macOS
+- name: Set up Python virtual environment on macOS
+  block:
+    - name: Create venv directory
+      file:
+        path: "{{ project_root | default(ansible_env.PWD) }}/.ansible_venv"
+        state: directory
+        mode: '0755'
+
+    - name: Create Python virtual environment
+      command: python3 -m venv {{ project_root | default(ansible_env.PWD) }}/.ansible_venv
+      args:
+        creates: "{{ project_root | default(ansible_env.PWD) }}/.ansible_venv/bin/activate"
+
+    - name: Install Ansible in virtual environment
+      pip:
+        name: ansible
+        state: present
+        virtualenv: "{{ project_root | default(ansible_env.PWD) }}/.ansible_venv"
+
+    - name: Install Ansible dependencies in virtual environment
+      pip:
+        name:
+          - ansible-lint
+          - molecule
+          - molecule-docker
+          - passlib
+          - boto3
+          - docker
+          - python-jenkins
+        state: present
+        virtualenv: "{{ project_root | default(ansible_env.PWD) }}/.ansible_venv"
+  when: is_macos | bool
+
+# Regular pip install for Linux
+- name: Install Ansible with pip (user-level)
+  pip:
+    name: ansible
+    state: present
+    executable: pip3
+    extra_args: --user
+  when: install_ansible | bool and not is_macos | bool
+
+- name: Install typical Ansible dependencies (user-level)
+  pip:
+    name:
+      - ansible-lint
+      - molecule
+      - molecule-docker
+      - passlib
+      - boto3
+      - docker
+      - python-jenkins
+    state: present
+    executable: pip3
+    extra_args: --user
+  when: install_ansible | bool and not is_macos | bool
+
+# Install project-specific Ansible requirements
+- name: Check if ansible/requirements.yaml exists
+  stat:
+    path: "{{ project_root | default(ansible_env.PWD) }}/ansible/requirements.yaml"
+  register: ansible_reqs_yaml
+
+- name: Install Ansible Galaxy collections if requirements.yaml exists (macOS)
+  shell: >
+    source {{ project_root | default(ansible_env.PWD) }}/.ansible_venv/bin/activate &&
+    cd {{ project_root | default(ansible_env.PWD) }}/ansible &&
+    ansible-galaxy collection install -r requirements.yaml
+  args:
+    executable: /bin/bash
+  when: ansible_reqs_yaml.stat.exists and is_macos | bool
+
+- name: Install Ansible Galaxy collections if requirements.yaml exists (Linux)
+  command:
+    cmd: ansible-galaxy collection install -r requirements.yaml
+    chdir: "{{ project_root | default(ansible_env.PWD) }}/ansible"
+  when: ansible_reqs_yaml.stat.exists and not is_macos | bool
+
+- name: Check if ansible/requirements.txt exists
+  stat:
+    path: "{{ project_root | default(ansible_env.PWD) }}/ansible/requirements.txt"
+  register: ansible_reqs_txt
+
+- name: Install Python requirements if requirements.txt exists (macOS)
+  pip:
+    requirements: "{{ project_root | default(ansible_env.PWD) }}/ansible/requirements.txt"
+    state: present
+    virtualenv: "{{ project_root | default(ansible_env.PWD) }}/.ansible_venv"
+  when: ansible_reqs_txt.stat.exists and is_macos | bool
+
+- name: Install Python requirements if requirements.txt exists (Linux)
+  pip:
+    requirements: "{{ project_root | default(ansible_env.PWD) }}/ansible/requirements.txt"
+    state: present
+    extra_args: --user
+  when: ansible_reqs_txt.stat.exists and not is_macos | bool
+
+# Create activation script for the virtual environment
+- name: Create virtual environment activation script
+  copy:
+    dest: "{{ project_root | default(ansible_env.PWD) }}/activate_ansible_env.sh"
+    content: |
+      #!/bin/bash
+      # This script activates the Ansible virtual environment
+      source {{ project_root | default(ansible_env.PWD) }}/.ansible_venv/bin/activate
+      echo "Ansible virtual environment activated. Run 'deactivate' to exit."
+    mode: '0755'
+  when: is_macos | bool
+
+# Create flag file to indicate dependencies are installed
+- name: Create dependency flag file
+  file:
+    path: "{{ project_root | default(ansible_env.PWD) }}/.ansible_deps_installed"
+    state: touch
+    mode: '0644'

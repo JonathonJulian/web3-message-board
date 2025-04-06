@@ -1,0 +1,27 @@
+[DEFAULT]
+# Ban hosts for 10 minutes by default
+bantime = 600
+# Check for new activity every 60 seconds
+findtime = 600
+# Ban after 5 attempts
+maxretry = 5
+# Ban via iptables
+banaction = iptables-multiport
+
+# SSH jail
+[sshd]
+enabled = true
+port = ssh
+logpath = %(sshd_log)s
+backend = %(sshd_backend)s
+maxretry = 3
+bantime = 3600
+
+# Nginx HTTP AUTH
+[nginx-http-auth]
+enabled = true
+filter = nginx-http-auth
+port = http,https
+logpath = /var/log/nginx/access.log
+maxretry = 5
+bantime = 1800

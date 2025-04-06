@@ -1,0 +1,95 @@
+---
+# Tasks for migrating from Promtail to Alloy
+
+- name: Set migrate_bypass_errors if not defined
+  ansible.builtin.set_fact:
+    migrate_bypass_errors: "{{ migrate_bypass_errors | default(false) }}"
+
+- name: Set migrate_generate_report if not defined
+  ansible.builtin.set_fact:
+    migrate_generate_report: "{{ migrate_generate_report | default(true) }}"
+
+- name: Check if Promtail configuration exists
+  ansible.builtin.stat:
+    path: "{{ promtail_config_file }}"
+  register: promtail_config_stat
+
+- name: Ensure Promtail service is stopped before migration
+  ansible.builtin.systemd:
+    name: "{{ promtail_service_name }}"
+    state: stopped
+  when: promtail_config_stat.stat.exists
+  ignore_errors: yes
+
+- name: Backup original Promtail configuration
+  ansible.builtin.copy:
+    src: "{{ promtail_config_file }}"
+    dest: "{{ promtail_config_file }}.bak"
+    mode: preserve
+    remote_src: yes
+  when: promtail_config_stat.stat.exists
+
+- name: Install Alloy first to ensure binary exists
+  ansible.builtin.include_tasks: alloy.yml
+
+- name: Convert Promtail configuration to Alloy (standard mode)
+  ansible.builtin.command: >
+    {{ alloy_install_dir | default('/usr/local/bin') }}/alloy convert
+    --source-format=promtail
+    --output={{ alloy_config_file | default('/etc/alloy/alloy.yaml') }}
+    {{ promtail_config_file }}
+  when:
+    - promtail_config_stat.stat.exists
+    - not migrate_bypass_errors | bool
+  register: conversion_result
+  failed_when: false
+
+- name: Generate diagnostic report if requested
+  ansible.builtin.command: >
+    {{ alloy_install_dir | default('/usr/local/bin') }}/alloy convert
+    --source-format=promtail
+    --report={{ alloy_config_dir | default('/etc/alloy') }}/migration_report.txt
+    --output={{ alloy_config_file | default('/etc/alloy/alloy.yaml') }}
+    {{ promtail_config_file }}
+  when:
+    - promtail_config_stat.stat.exists
+    - migrate_generate_report | bool
+    - conversion_result.rc != 0
+  failed_when: false
+
+- name: Convert Promtail configuration to Alloy (bypass errors)
+  ansible.builtin.command: >
+    {{ alloy_install_dir | default('/usr/local/bin') }}/alloy convert
+    --source-format=promtail
+    --bypass-errors
+    --output={{ alloy_config_file | default('/etc/alloy/alloy.yaml') }}
+    {{ promtail_config_file }}
+  when:
+    - promtail_config_stat.stat.exists
+    - conversion_result.rc != 0
+    - migrate_bypass_errors | bool
+
+- name: Display migration report location
+  ansible.builtin.debug:
+    msg: "Migration report available at: {{ alloy_config_dir | default('/etc/alloy') }}/migration_report.txt"
+  when: migrate_generate_report | bool
+
+- name: Verify Alloy configuration with Promtail compatibility mode
+  ansible.builtin.command: >
+    {{ alloy_install_dir | default('/usr/local/bin') }}/alloy --config.format=promtail
+    --config.file={{ promtail_config_file }} verify
+  when: promtail_config_stat.stat.exists
+  register: verify_result
+  failed_when: false
+
+- name: Display verification result
+  ansible.builtin.debug:
+    msg: "Alloy verification with Promtail config {{ 'succeeded' if verify_result.rc == 0 else 'failed' }}"
+  when: promtail_config_stat.stat.exists
+
+- name: Disable Promtail service after migration
+  ansible.builtin.systemd:
+    name: "{{ promtail_service_name }}"
+    enabled: no
+  when: promtail_config_stat.stat.exists
+  ignore_errors: yes

@@ -1,0 +1,37 @@
+---
+# GitHub CLI installation tasks
+
+- name: Ensure required packages are installed
+  ansible.builtin.apt:
+    name:
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+
+- name: Download GitHub CLI GPG key
+  ansible.builtin.get_url:
+    url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+    dest: /tmp/githubcli-archive-keyring.gpg
+    mode: '0644'
+  register: gpg_download
+  retries: 3
+  delay: 5
+  until: gpg_download is succeeded
+
+- name: Install GitHub CLI GPG key
+  ansible.builtin.shell: |
+    cat /tmp/githubcli-archive-keyring.gpg | sudo gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg
+  args:
+    creates: /usr/share/keyrings/githubcli-archive-keyring.gpg
+
+- name: Add GitHub CLI repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+    state: present
+    update_cache: yes
+
+- name: Install GitHub CLI
+  ansible.builtin.apt:
+    name: gh
+    state: present

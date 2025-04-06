@@ -1,0 +1,94 @@
+---
+# Nginx-specific security configurations
+
+# Apply security headers
+- name: Create Nginx security headers configuration
+  ansible.builtin.template:
+    src: security_headers.conf.j2
+    dest: /etc/nginx/conf.d/security_headers.conf
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart Nginx
+  become: true
+  tags: ['security', 'headers']
+
+# Implement rate limiting
+- name: Create Nginx rate limiting configuration
+  ansible.builtin.template:
+    src: rate_limiting.conf.j2
+    dest: /etc/nginx/conf.d/rate_limiting.conf
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart Nginx
+  become: true
+  tags: ['security', 'rate-limiting']
+
+# Remove server tokens (hide version info)
+- name: Ensure server_tokens are off
+  ansible.builtin.lineinfile:
+    path: /etc/nginx/nginx.conf
+    regexp: '^\s*server_tokens\s+.*$'
+    line: '    server_tokens off;'
+    insertafter: '^\s*http\s+{'
+  notify: Restart Nginx
+  become: true
+  tags: ['security']
+
+# Add custom error pages
+- name: Create Nginx custom error pages directory
+  ansible.builtin.file:
+    path: /var/www/error_pages
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: 0755
+  become: true
+  tags: ['security']
+
+- name: Copy custom error pages
+  ansible.builtin.template:
+    src: "error_{{ item }}.html.j2"
+    dest: "/var/www/error_pages/{{ item }}.html"
+    owner: www-data
+    group: www-data
+    mode: 0644
+  loop:
+    - "403"
+    - "404"
+    - "500"
+    - "502"
+    - "503"
+    - "504"
+  notify: Restart Nginx
+  become: true
+  tags: ['security']
+
+- name: Configure custom error pages
+  ansible.builtin.template:
+    src: error_pages.conf.j2
+    dest: /etc/nginx/conf.d/error_pages.conf
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart Nginx
+  become: true
+  tags: ['security']
+
+# Disable unused Nginx modules
+- name: Check for unused Nginx modules
+  ansible.builtin.shell: find /etc/nginx/modules-enabled -type l -name "*.conf" | xargs basename | sort
+  register: enabled_modules
+  changed_when: false
+  become: true
+
+- name: Disable unnecessary Nginx modules
+  ansible.builtin.file:
+    path: "/etc/nginx/modules-enabled/{{ item }}"
+    state: absent
+  loop: "{{ enabled_modules.stdout_lines | select('search', nginx_disabled_modules) | list }}"
+  when: nginx_disabled_modules is defined and nginx_disabled_modules | length > 0
+  notify: Restart Nginx
+  become: true
+  tags: ['security']

@@ -1,0 +1,257 @@
+---
+name: Ansible Deployment
+run-name: |
+  Deploy ${{
+    inputs.deployment_type == 'ansible-deploy' && 'Full Infrastructure' ||
+    inputs.deployment_type == 'ansible-nginx' && 'Nginx' ||
+    inputs.deployment_type == 'ansible-frontend' && 'Frontend' ||
+    inputs.deployment_type == 'ansible-logging' && 'Logging Stack' ||
+    inputs.deployment_type == 'ansible-api' && 'API Service' ||
+    'Unknown Component'
+  }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_type:
+        description: 'Ansible deployment type'
+        required: true
+        type: choice
+        options:
+          - ansible-deploy
+          - ansible-api
+          - ansible-frontend
+          - ansible-nginx
+          - ansible-logging
+          - ansible-security
+      version_tag:
+        description: 'Version tag to deploy (e.g. v1.0.99, include v prefix)'
+        required: false
+        type: string
+
+jobs:
+  # ======================================
+  # Validate the specified version tag
+  # ======================================
+  validate-tag:
+    name: Validate Tag Exists
+    runs-on: ubuntu-latest
+    if: github.event.inputs.version_tag != ''
+    outputs:
+      tag_exists: ${{ steps.check-tag.outputs.tag_exists }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if tag exists
+        id: check-tag
+        run: |
+          TAG="${{  github.event.inputs.version_tag  }}"
+          echo "🔍 Checking if tag \"$TAG\" exists in the repository..."
+
+          if git tag -l | grep -q "^$TAG$"; then
+            echo "✅ Tag \"$TAG\" exists in the repository"
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "❌ Tag \"$TAG\" does NOT exist in the repository"
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+            echo "::error::The specified tag \"$TAG\" does not exist in the repository. Please check the tag name and try again."
+          fi
+
+  # ======================================
+  # Main deployment job
+  # ======================================
+  ansible-deployment:
+    name: Run Ansible Deployment
+    needs: validate-tag
+    if: github.event.inputs.version_tag == '' || needs.validate-tag.outputs.tag_exists == 'true'
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # --------------------------------
+      # Setup environment dependencies
+      # --------------------------------
+      - name: Setup runner dependencies
+        run: |
+          echo "🔧 Setting up runner dependencies..."
+
+          # Try using Make target first for runner setup
+          if grep -q "github-runner-setup" Makefile; then
+            echo "📦 Setting up dependencies using Makefile target..."
+            make github-runner-setup
+          elif [ -f "ansible/github_actions_setup.yml" ]; then
+            echo "📦 Setting up dependencies using Ansible playbook directly..."
+
+            # Create a temporary inventory file for localhost
+            echo "[github_runners]" > /tmp/github_runner_inventory.ini
+            echo "localhost ansible_connection=local" >> /tmp/github_runner_inventory.ini
+
+            # Run the Ansible playbook locally
+            ansible-playbook ansible/github_actions_setup.yml -i /tmp/github_runner_inventory.ini -e "project_root=$(pwd)"
+          else
+            echo "⚠️ No Ansible GitHub Actions setup playbook found. Aborting."
+            exit 1
+          fi
+
+          # Verify installations
+          echo "✅ Dependency installation complete"
+          echo "🐍 Python version: $(python3 --version)"
+          echo "🔄 Ansible version: $(ansible --version | head -n1)"
+          if command -v gh &> /dev/null; then
+            echo "🐙 GitHub CLI version: $(gh --version | head -n1)"
+          else
+            echo "🐙 GitHub CLI not installed"
+          fi
+
+      # --------------------------------
+      # Setup SSH authentication
+      # --------------------------------
+      - name: Setup SSH key
+        run: |
+          echo "🔐 Setting up SSH authentication..."
+
+          # Create SSH directory if it doesn't exist
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          # Write the SSH private key
+          echo "${{  secrets.SSH_PRIVATE_KEY  }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          # Extract hosts from inventory file and add to known_hosts
+          echo "🔄 Adding inventory hosts to known_hosts..."
+          HOSTS=$(grep -v "^\[" ansible/inventory.ini | grep -v "^#" | grep -v "^$" | awk '{print $1}')
+          HOSTS_COUNT=0
+
+          for HOST in $HOSTS; do
+            if [[ "$HOST" != *"="* ]]; then
+              echo "  → Adding \"$HOST\" to known_hosts"
+              ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+              HOSTS_COUNT=$((HOSTS_COUNT+1))
+            fi
+          done
+
+          echo "✅ Added \"$HOSTS_COUNT\" hosts to known_hosts"
+
+      # --------------------------------
+      # Run the Ansible deployment
+      # --------------------------------
+      - name: Run Ansible deployment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANSIBLE_HOST_KEY_CHECKING: "false"
+        run: |
+          echo "🚀 Starting Ansible deployment..."
+
+          # Install Ansible dependencies if not already done
+          if [ ! -f ".ansible_deps_installed" ]; then
+            echo "📦 Installing Ansible dependencies..."
+            cd ansible
+            ansible-galaxy collection install -r requirements.yaml
+            pip install -r requirements.txt
+            cd ..
+            touch .ansible_deps_installed
+          fi
+
+          # Set up deployment variables
+          DEPLOYMENT_TYPE="${{  github.event.inputs.deployment_type  }}"
+          EXTRA_VARS=""
+
+          # Version tag handling
+          if [ -n "${{  github.event.inputs.version_tag  }}" ]; then
+            VERSION_TAG="${{  github.event.inputs.version_tag  }}"
+            VERSION_NUMBER="${VERSION_TAG#v}"
+            echo "📌 Using version tag: \"$VERSION_TAG\" (\"$VERSION_NUMBER\")"
+            EXTRA_VARS="api_release_version=\"$VERSION_NUMBER\" frontend_release_version=\"$VERSION_NUMBER\""
+          fi
+
+          # Build the tags parameter based on deployment type
+          DEPLOYMENT_TYPE="${{  github.event.inputs.deployment_type  }}"
+
+          # Extract clean tag name from deployment type (remove "ansible-" prefix)
+          if [ "$DEPLOYMENT_TYPE" = "ansible-deploy" ]; then
+            # Full deployment doesn't use tags
+            TAG_PARAM=""
+            COMPONENT="Full infrastructure"
+          else
+            # Extract the tag name from input (everything after "ansible-")
+            TAG_NAME="${DEPLOYMENT_TYPE#ansible-}"
+
+            # Special case for security which needs multiple tags
+            if [ "$TAG_NAME" = "security" ]; then
+              TAG_PARAM="--tags security,users,firewall,ssh"
+            else
+              TAG_PARAM="--tags ${TAG_NAME}"
+            fi
+
+            # Set component name based on the tag
+            case "$TAG_NAME" in
+              api)         COMPONENT="API service" ;;
+              frontend)    COMPONENT="Frontend application" ;;
+              nginx)       COMPONENT="Nginx" ;;
+              logging)     COMPONENT="Logging stack" ;;
+              security)    COMPONENT="Security settings" ;;
+              *)           COMPONENT="$TAG_NAME" ;;
+            esac
+          fi
+
+          echo "🎯 Deploying component: \"$COMPONENT\""
+
+          # Set up additional extra vars and run the deployment
+          ALL_EXTRA_VARS="github_token=\"?$GITHUB_TOKEN"?\" ansible_user=ubuntu $EXTRA_VARS"
+
+          echo "🔧 Running make \"$DEPLOYMENT_TYPE\" with the following parameters:"
+          echo "   → Extra vars: github_token=*** ${EXTRA_VARS##*( )}"
+          echo "   → Tags: ${TAG_PARAM##*( )}"
+
+          make "$DEPLOYMENT_TYPE" ANSIBLE_EXTRA_VARS="$ALL_EXTRA_VARS"
+
+          echo "✅ Deployment completed successfully"
+
+      # --------------------------------
+      # Generate deployment summary
+      # --------------------------------
+      - name: Deployment summary
+        run: |
+          {
+            echo "## 📋 Deployment Summary"
+            echo "### 🛠️ Deployment Configuration"
+            echo "| Setting | Value |"
+            echo "| --- | --- |"
+            echo "| ⚙️ **Deployment type** | ${{  github.event.inputs.deployment_type  }} |"
+            echo "| 🔐 **Authentication method** | SSH key |"
+            echo "| 👤 **User** | ubuntu |"
+            echo "| 🖥️ **Target servers** | Using inventory file |"
+
+            if [ -n "${{  github.event.inputs.version_tag  }}" ]; then
+              echo "| 📦 **Version Tag** | ${{  github.event.inputs.version_tag  }} |"
+            fi
+
+            echo "### 📊 Deployment Status"
+
+            case "${{  github.event.inputs.deployment_type  }}" in
+              ansible-deploy)
+                echo "✅ **Full Ansible playbook executed**"
+                ;;
+              ansible-api)
+                echo "✅ **API service deployed**"
+                ;;
+              ansible-frontend)
+                echo "✅ **Frontend application deployed**"
+                ;;
+              ansible-nginx)
+                echo "✅ **Nginx configuration deployed**"
+                ;;
+              ansible-logging)
+                echo "✅ **Logging configuration deployed**"
+                ;;
+              ansible-security)
+                echo "✅ **Security settings deployed**"
+                ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"

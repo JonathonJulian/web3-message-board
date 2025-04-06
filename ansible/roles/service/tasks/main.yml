@@ -1,0 +1,139 @@
+---
+# Go service tasks
+
+# Download from GitHub releases using gh CLI
+- name: Download binary from GitHub releases
+  ansible.builtin.shell: |
+    export GH_TOKEN="{{ github_token }}"
+    # Convert architecture to format used in GitHub release (x86_64 -> amd64)
+    arch="{{ ansible_architecture }}"
+    if [ "$arch" = "x86_64" ]; then
+      arch="amd64"
+    fi
+    binary_pattern="{{ service_name }}-linux-${arch}"
+    if ! gh release download {{ service_release_version | default(release_version) }} --repo "{{ service_github_repo }}" --pattern "${binary_pattern}" --clobber; then
+      echo "Failed to download binary"
+      exit 1
+    fi
+    if [ ! -f "${binary_pattern}" ]; then
+      echo "Downloaded file not found"
+      exit 1
+    fi
+
+    # Calculate hash of the downloaded binary
+    BINARY_HASH=$(sha256sum "${binary_pattern}" | cut -d ' ' -f 1)
+    echo "Downloaded binary hash: ${BINARY_HASH}"
+
+    # Save the hash for verification after install
+    echo "${BINARY_HASH}" > /tmp/{{ service_name }}_binary_hash.txt
+
+    sudo mv "${binary_pattern}" "{{ service_binary_dir }}/{{ service_name }}"
+    sudo chmod 0755 "{{ service_binary_dir }}/{{ service_name }}"
+    sudo chown "{{ service_user }}:{{ service_group }}" "{{ service_binary_dir }}/{{ service_name }}"
+  notify: Restart service
+  register: download_result
+  until: download_result is succeeded
+
+# Force handler to run immediately when binary is updated
+- name: Force handlers to run after binary update
+  ansible.builtin.meta: flush_handlers
+  when: download_result is changed
+
+# Create log file
+- name: Create log file
+  ansible.builtin.file:
+    path: "{{ service_log_file }}"
+    state: touch
+    owner: "{{ service_user }}"
+    group: "{{ service_group }}"
+    mode: 0644
+  changed_when: false
+
+# Install systemd service file
+- name: Install systemd service file
+  ansible.builtin.template:
+    src: service.j2
+    dest: /etc/systemd/system/{{ service_name }}.service
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart service
+
+# Check if service exists already
+- name: Check if service already exists
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ service_name }}.service"
+  register: service_file
+
+# Enable and start service - for fresh installs
+- name: Enable and start service (new installation)
+  ansible.builtin.systemd:
+    name: "{{ service_name }}"
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  when: not service_file.stat.exists
+  register: service_start_result
+
+# Enable and restart service - for updates
+- name: Enable and restart service (update)
+  ansible.builtin.systemd:
+    name: "{{ service_name }}"
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+  when: service_file.stat.exists
+  register: service_restart_result
+
+# Verify binary hash after installation
+- name: Verify installed binary hash
+  when: service_verify_binary | bool
+  ansible.builtin.shell: |
+    # Get the expected hash
+    EXPECTED_HASH=$(cat /tmp/{{ service_name }}_binary_hash.txt)
+
+    # Calculate the hash of the installed binary
+    INSTALLED_HASH=$(sha256sum "{{ service_binary_dir }}/{{ service_name }}" | cut -d ' ' -f 1)
+
+    echo "Expected hash: ${EXPECTED_HASH}"
+    echo "Installed binary hash: ${INSTALLED_HASH}"
+
+    # Compare the hashes
+    if [ "${EXPECTED_HASH}" != "${INSTALLED_HASH}" ]; then
+      echo "Hash verification failed!"
+      exit 1
+    else
+      echo "Binary verified successfully"
+    fi
+  register: hash_verification
+  changed_when: false
+  failed_when: hash_verification.rc != 0
+
+# Wait for service to be ready before checking health
+- name: Wait for service to start
+  ansible.builtin.wait_for:
+    port: "{{ service_port }}"
+    delay: "{{ 5 if not service_file.stat.exists else 2 }}"  # longer delay for fresh installs
+    timeout: "{{ 60 if not service_file.stat.exists else 30 }}"  # longer timeout for fresh installs
+  when: service_health_enabled | bool
+
+# Check health endpoint - only check the primary endpoint
+- name: Check API health
+  when: service_health_enabled | bool
+  ansible.builtin.uri:
+    url: "http://localhost:{{ service_port }}{{ service_health_endpoint }}"
+    method: GET
+    status_code: 200
+    return_content: yes
+  register: health_result
+  retries: "{{ service_health_retries }}"
+  delay: "{{ service_health_delay }}"
+  until: health_result.status == 200
+  failed_when: health_result.status != 200
+  changed_when: false
+
+# Output health check result
+- name: Display health check result
+  when: service_health_enabled | bool and health_result.status == 200
+  ansible.builtin.debug:
+    msg: "Service {{ service_name }} health check passed. Response: {{ health_result.content | default('OK') }}"

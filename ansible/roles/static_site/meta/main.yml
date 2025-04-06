@@ -1,0 +1,24 @@
+---
+galaxy_info:
+  author: Jonathon Fritz
+  description: Deploys static web content
+  company: Nextwave
+  license: MIT
+  min_ansible_version: 2.9
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+  galaxy_tags:
+    - web
+    - static
+    - html
+    - frontend
+    - site
+    - deployment
+
+dependencies:
+  - nginx

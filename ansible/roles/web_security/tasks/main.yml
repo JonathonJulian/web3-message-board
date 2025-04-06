@@ -1,0 +1,15 @@
+---
+# Tasks for system-wide security hardening
+
+# Include subtasks
+- name: Install and configure fail2ban
+  include_tasks: fail2ban.yml
+  tags: ['security', 'fail2ban']
+
+- name: Implement file system hardening
+  include_tasks: filesystem_security.yml
+  tags: ['security', 'filesystem']
+
+- name: Apply system hardening
+  include_tasks: system_hardening.yml
+  tags: ['security', 'system']

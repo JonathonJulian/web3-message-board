@@ -1,0 +1,11 @@
+---
+# Default variables for the static site role
+static_site_name: "site"
+static_site_user: "www-data"
+static_site_group: "www-data"
+static_site_install_dir: "/var/www/site"
+static_site_github_repo: "organization/repo"
+static_site_release_version: "latest"
+static_site_dir_mode: "0755"
+static_site_file_mode: "0644"
+static_site_archive_pattern: "bundle.tar.gz"

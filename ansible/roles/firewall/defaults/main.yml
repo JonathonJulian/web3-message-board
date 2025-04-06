@@ -1,0 +1,16 @@
+---
+# Firewall role default variables
+firewall_enabled: true
+
+# Port configurations - list of dictionaries with port and protocol
+firewall_rules:
+  - port: 22
+    proto: tcp
+    comment: "SSH"
+  - port: 80
+    proto: tcp
+    comment: "HTTP"
+
+# General firewall settings
+firewall_default_policy: deny
+firewall_enable_logging: false

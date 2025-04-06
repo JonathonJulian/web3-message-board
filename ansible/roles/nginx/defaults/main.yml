@@ -1,0 +1,62 @@
+---
+# Nginx role default variables
+
+# Core nginx settings
+nginx_port: 80
+nginx_server_name: localhost
+nginx_root_dir: /var/www/html
+nginx_index_files: "index.html index.htm"
+
+# Logging configuration
+nginx_log_path: /var/log/nginx
+nginx_access_log: "{{ nginx_log_path }}/access.log"
+nginx_error_log: "{{ nginx_log_path }}/error.log"
+
+# Performance settings
+nginx_worker_processes: "auto"
+nginx_worker_connections: 1024
+nginx_keepalive_timeout: 65
+
+# Feature flags
+nginx_enable_gzip: true
+nginx_server_tokens: false
+
+# Web server configuration
+webserver_enabled: true
+webserver_type: "nginx"
+
+# Proxy configurations
+nginx_proxy_locations: []
+# Example:
+# nginx_proxy_locations:
+#   - location: /api/
+#     backend_url: http://localhost:8080
+#     websocket: false
+
+# Security settings
+nginx_disabled_modules: []
+
+# Rate limiting
+nginx_rate_limit_enabled: true
+nginx_rate_limit_zone: "$binary_remote_addr"
+nginx_rate_limit_size: "10m"
+nginx_rate_limit_rate: "100r/s"
+nginx_rate_limit_burst: 200
+
+# Security headers
+nginx_security_headers:
+  - "X-Content-Type-Options nosniff"
+  - "X-Frame-Options SAMEORIGIN"
+  - "X-XSS-Protection 1; mode=block"
+  - "Referrer-Policy strict-origin-when-cross-origin"
+  - >-
+    Content-Security-Policy "default-src 'self';
+    script-src 'self' 'unsafe-inline';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data:;
+    connect-src 'self';
+    font-src 'self';
+    object-src 'none';
+    media-src 'self';
+    frame-src 'self';
+    base-uri 'self'"

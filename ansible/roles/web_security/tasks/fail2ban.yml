@@ -1,0 +1,155 @@
+---
+# Fail2ban installation and configuration
+
+# Install fail2ban
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+  tags: ['security', 'fail2ban']
+
+# Configure jail.local
+- name: Create fail2ban jail.local
+  ansible.builtin.template:
+    src: fail2ban_jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart fail2ban
+  tags: ['security', 'fail2ban']
+
+# Configure Nginx filter
+- name: Create fail2ban Nginx filter
+  ansible.builtin.template:
+    src: fail2ban_nginx.conf.j2
+    dest: /etc/fail2ban/filter.d/nginx-http-auth.conf
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart fail2ban
+  tags: ['security', 'fail2ban']
+
+# Configure Nginx badbots filter
+- name: Create fail2ban Nginx badbots filter
+  ansible.builtin.template:
+    src: fail2ban_nginx_badbots.conf.j2
+    dest: /etc/fail2ban/filter.d/nginx-badbots.conf
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart fail2ban
+  tags: ['security', 'fail2ban']
+
+# Make sure the socket directory exists with correct permissions
+- name: Ensure fail2ban socket directory exists
+  ansible.builtin.file:
+    path: /var/run/fail2ban
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  when: not ansible_check_mode
+  tags: ['security', 'fail2ban']
+
+# Stop fail2ban if it's running to ensure clean restart
+- name: Stop fail2ban if running
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: stopped
+  ignore_errors: true
+  when: not ansible_check_mode
+  tags: ['security', 'fail2ban']
+
+# Enable and start fail2ban
+- name: Enable and start fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  register: fail2ban_start
+  tags: ['security', 'fail2ban']
+
+# Check if fail2ban service is active
+- name: Check if fail2ban service is active
+  ansible.builtin.shell: systemctl is-active fail2ban
+  register: fail2ban_active
+  changed_when: false
+  ignore_errors: true
+  when: not ansible_check_mode
+  tags: ['security', 'fail2ban']
+
+# Always check the logs, even if service shows failed
+- name: Check detailed fail2ban logs
+  ansible.builtin.shell: journalctl -u fail2ban -n 10
+  register: fail2ban_logs_detail
+  changed_when: false
+  ignore_errors: true
+  when: not ansible_check_mode
+  tags: ['security', 'fail2ban']
+
+- name: Display detailed fail2ban logs
+  ansible.builtin.debug:
+    var: fail2ban_logs_detail.stdout_lines | default(['No log data available'])
+  when: not ansible_check_mode
+  tags: ['security', 'fail2ban']
+
+# Verify fail2ban service status
+- name: Report fail2ban service state
+  ansible.builtin.debug:
+    msg: "fail2ban service state: {{ fail2ban_active.stdout | default('unknown') }}"
+  when: not ansible_check_mode
+  tags: ['security', 'fail2ban']
+
+# Wait for fail2ban to initialize
+- name: Wait before checking status (5 seconds)
+  ansible.builtin.pause:
+    seconds: 5
+  when: not ansible_check_mode and fail2ban_active.stdout == "active"
+  tags: ['security', 'fail2ban']
+
+# Get basic information about fail2ban
+- name: Get fail2ban version
+  ansible.builtin.command: fail2ban-client --version
+  register: fail2ban_version
+  changed_when: false
+  ignore_errors: true
+  when: not ansible_check_mode and fail2ban_active.stdout == "active"
+  tags: ['security', 'fail2ban']
+
+- name: Display fail2ban version
+  ansible.builtin.debug:
+    var: fail2ban_version.stdout_lines | default(['Version information not available'])
+  when: not ansible_check_mode and fail2ban_active.stdout == "active"
+  tags: ['security', 'fail2ban']
+
+# Check socket path
+- name: Look for fail2ban socket location
+  ansible.builtin.shell: find /var -name "fail2ban.sock" 2>/dev/null || echo "Socket not found"
+  register: socket_search
+  changed_when: false
+  ignore_errors: true
+  when: not ansible_check_mode and fail2ban_active.stdout == "active"
+  tags: ['security', 'fail2ban']
+
+- name: Display socket search results
+  ansible.builtin.debug:
+    var: socket_search.stdout_lines
+  when: not ansible_check_mode and fail2ban_active.stdout == "active"
+  tags: ['security', 'fail2ban']
+
+# Check fail2ban logs for insights
+- name: Check fail2ban logs
+  ansible.builtin.shell: journalctl -u fail2ban -n 5
+  register: fail2ban_logs
+  changed_when: false
+  ignore_errors: true
+  when: not ansible_check_mode and fail2ban_active.stdout == "active"
+  tags: ['security', 'fail2ban']
+
+- name: Display fail2ban logs
+  ansible.builtin.debug:
+    var: fail2ban_logs.stdout_lines | default(['Logs not available'])
+  when: not ansible_check_mode and fail2ban_active.stdout == "active"
+  tags: ['security', 'fail2ban']

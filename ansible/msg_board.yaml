@@ -1,0 +1,38 @@
+---
+# Main playbook for server provisioning
+- name: Configure Web3 Message Board
+  hosts: web:api
+  become: true
+  vars_files:
+    - vars/main.yml
+
+  pre_tasks:
+    - name: Display authentication method being used
+      debug:
+        msg: "Using authentication method: {{auth.method | default('from inventory')}}"
+      tags: ['always']
+
+    - name: Update apt cache and apply security updates
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+        upgrade: dist
+        autoremove: yes
+      tags: ['system-update']
+
+  roles:
+    # System configuration and security
+    - {role: users, tags: ['users', 'ssh', 'security']}
+    - {role: hosts, tags: ['hosts', 'ingress']}
+    - {role: firewall, tags: ['firewall', 'security']}
+    - {role: web_security, tags: ['security', 'hardening']}
+
+    # Web server setup
+    - {role: nginx, tags: ['nginx', 'webserver']}
+
+    # Monitoring and observability
+    - {role: logging, tags: ['logging', 'monitoring']}
+
+    # Application components
+    - {role: service, tags: ['api', 'application']}
+    - {role: static_site, tags: ['frontend', 'application']}

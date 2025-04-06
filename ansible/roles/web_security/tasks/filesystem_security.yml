@@ -1,0 +1,65 @@
+---
+# File system security hardening
+
+# Fix permissions on web directories
+- name: Enforce strict permissions on web content directories
+  ansible.builtin.file:
+    path: "{{item.path}}"
+    owner: "{{item.owner | default('www-data')}}"
+    group: "{{item.group | default('www-data')}}"
+    mode: "{{item.mode}}"
+    recurse: yes
+  loop: "{{security_content_directories}}"
+  when: security_content_directories is defined
+  tags: ['security', 'filesystem']
+
+# Implement sticky bit on required directories
+- name: Set sticky bit on world-writable directories
+  ansible.builtin.command: "find {{item}} -type d -perm -0002 -exec chmod +t {} \\;"
+  loop:
+    - /var/www
+    - /tmp
+    - /var/tmp
+  changed_when: false
+  tags: ['security', 'filesystem']
+
+# Secure /tmp with separate mount
+- name: Check if /tmp is a separate mount
+  ansible.builtin.shell: mount | grep ' /tmp '
+  register: tmp_mount
+  changed_when: false
+  failed_when: false
+  check_mode: no
+  tags: ['security', 'filesystem']
+
+- name: Create tmpfs entry in fstab if needed
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: 'tmpfs /tmp tmpfs defaults,rw,nosuid,nodev,noexec,relatime,size=1G 0 0'
+    state: present
+  when: tmp_mount.rc != 0 and security_mount_tmp | default(false)
+  tags: ['security', 'filesystem']
+
+# Create and secure required directories
+- name: Ensure web directories exist with proper permissions
+  ansible.builtin.file:
+    path: "{{item.path}}"
+    state: directory
+    owner: "{{item.owner | default('www-data')}}"
+    group: "{{item.group | default('www-data')}}"
+    mode: "{{item.mode | default('0755')}}"
+  loop:
+    - {path: '/var/www/logs', owner: 'www-data', group: 'www-data', mode: '0750'}
+    - {path: '/var/www/sessions', owner: 'www-data', group: 'www-data', mode: '0750'}
+    - {path: '/var/www/temp', owner: 'www-data', group: 'www-data', mode: '0750'}
+  tags: ['security', 'filesystem']
+
+# Create upload directories with specific permissions
+- name: Ensure upload directory exists with proper permissions
+  ansible.builtin.file:
+    path: "/var/www/uploads"
+    state: directory
+    owner: "www-data"
+    group: "www-data"
+    mode: "0750"
+  tags: ['security', 'filesystem']

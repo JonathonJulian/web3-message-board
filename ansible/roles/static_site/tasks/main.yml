@@ -1,0 +1,116 @@
+---
+# Tasks for deploying the static site
+
+# Download from GitHub releases
+- name: Download static site from GitHub releases
+  ansible.builtin.shell: |
+    export GH_TOKEN="{{ github_token }}"
+    # Use the correct filename pattern with clobber flag to overwrite existing files
+    if ! gh release download {{ static_site_release_version }} --repo {{ static_site_github_repo }} --pattern "{{ static_site_archive_pattern }}" --clobber; then
+      echo "Failed to download static site"
+      exit 1
+    fi
+
+    # Extract to temporary directory
+    mkdir -p /tmp/static_site
+    tar -xzf {{ static_site_archive_pattern }} -C /tmp/static_site --strip-components=1
+  notify: Restart Nginx
+  register: download_result
+  failed_when: download_result.rc != 0
+
+# Ensure destination directory exists
+- name: Ensure destination directory exists
+  ansible.builtin.file:
+    path: "{{ static_site_install_dir }}"
+    state: directory
+    owner: "{{ static_site_user }}"
+    group: "{{ static_site_group }}"
+    mode: "{{ static_site_dir_mode }}"
+  become: true
+
+# Deploy static site
+- name: Deploy static site
+  ansible.builtin.shell: |
+    sudo cp -r /tmp/static_site/* {{ static_site_install_dir }}/
+    sudo chown -R {{ static_site_user }}:{{ static_site_group }} {{ static_site_install_dir }}
+    sudo chmod -R {{ static_site_dir_mode }} {{ static_site_install_dir }}
+  notify: Restart Nginx
+
+# Ensure correct ownership and permissions
+- name: Ensure correct ownership and permissions
+  ansible.builtin.file:
+    path: "{{ static_site_install_dir }}"
+    state: directory
+    owner: "{{ static_site_user }}"
+    group: "{{ static_site_group }}"
+    mode: "{{ static_site_dir_mode }}"
+    recurse: yes
+  become: true
+
+# Health check for the frontend
+- name: Wait for frontend to become available
+  ansible.builtin.uri:
+    url: "http://localhost"
+    return_content: yes
+    status_code: 200
+  register: frontend_health
+  retries: 5
+  delay: 5
+  until: frontend_health.status == 200 and frontend_health.content is search('<html')
+  changed_when: false
+  ignore_errors: true
+  tags: frontend
+
+- name: Display frontend health check result
+  ansible.builtin.debug:
+    msg: >
+      {% if frontend_health.status is defined and frontend_health.status == 200 and frontend_health.content is search('<html') %}
+      ✅ Frontend health check passed - HTML content detected
+      {% else %}
+      ❌ Frontend health check failed - {{ frontend_health.msg | default('Unknown error') }}
+      {% endif %}
+  tags: frontend
+
+# Run diagnostics if health check failed
+- name: Run frontend diagnostics
+  when: frontend_health.status is not defined or frontend_health.status != 200 or not (frontend_health.content is search('<html'))
+  block:
+    - name: Check Nginx status
+      ansible.builtin.systemd:
+        name: nginx
+        state: started
+      register: nginx_status
+      ignore_errors: yes
+      become: true
+      tags: frontend
+
+    - name: Verify Nginx configuration
+      ansible.builtin.command: nginx -t
+      register: nginx_config
+      ignore_errors: yes
+      become: true
+      tags: frontend
+
+    - name: Check frontend files exist
+      ansible.builtin.stat:
+        path: "{{ static_site_install_dir }}/index.html"
+      register: index_file
+      tags: frontend
+
+    - name: Inspect frontend directory contents
+      ansible.builtin.shell: "ls -la {{ static_site_install_dir }}"
+      register: dir_contents
+      ignore_errors: yes
+      tags: frontend
+
+    - name: Display diagnostic information
+      ansible.builtin.debug:
+        msg: |
+          === FRONTEND DIAGNOSTICS ===
+          Nginx status: {{ nginx_status.status.ActiveState | default('Unknown') }}
+          Nginx config check: {{ 'Valid' if nginx_config.rc == 0 else 'Invalid - ' + nginx_config.stderr }}
+          Frontend static directory: {{ static_site_install_dir }}
+          index.html exists: {{ index_file.stat.exists | default(false) }}
+          Directory contents:
+          {{ dir_contents.stdout | default('Unable to list directory contents') }}
+      tags: frontend

@@ -1,0 +1,53 @@
+---
+# Configure log rotation for various log files
+
+- name: Ensure logrotate is installed
+  ansible.builtin.apt:
+    name: logrotate
+    state: present
+  become: true
+  tags: ['logging', 'logrotate']
+
+- name: Configure logrotate for application logs
+  ansible.builtin.template:
+    src: logrotate_app.j2
+    dest: /etc/logrotate.d/application
+    owner: root
+    group: root
+    mode: 0644
+  become: true
+  tags: ['logging', 'logrotate']
+
+- name: Configure logrotate for web logs
+  ansible.builtin.template:
+    src: logrotate_web.j2
+    dest: /etc/logrotate.d/web
+    owner: root
+    group: root
+    mode: 0644
+  become: true
+  tags: ['logging', 'logrotate']
+
+- name: Configure logrotate for nginx logs
+  ansible.builtin.template:
+    src: logrotate_nginx.j2
+    dest: /etc/logrotate.d/nginx
+    owner: root
+    group: root
+    mode: 0644
+  become: true
+  tags: ['logging', 'logrotate']
+
+- name: Run logrotate test to verify configurations
+  ansible.builtin.command: logrotate -d /etc/logrotate.conf
+  register: logrotate_test
+  changed_when: false
+  check_mode: yes
+  become: true
+  tags: ['logging', 'logrotate']
+
+- name: Display logrotate test results
+  ansible.builtin.debug:
+    msg: "Logrotate configuration is valid"
+  when: logrotate_test.rc == 0
+  tags: ['logging', 'logrotate']

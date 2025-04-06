@@ -1,0 +1,21 @@
+---
+galaxy_info:
+  author: Jonathon Fritz
+  description: Installs GitHub CLI
+  company: Nextwave
+  license: MIT
+  min_ansible_version: 2.9
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+  galaxy_tags:
+    - github
+    - cli
+    - development
+    - tools
+
+dependencies: []
