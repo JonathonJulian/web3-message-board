@@ -1,0 +1,190 @@
+---
+# Configure Loki Stack
+lokiStack:
+  enabled: true  # Enable the loki-stack chart
+
+# Configure loki-stack chart with correct structure
+loki-stack:
+  # Configure loki within the stack
+  loki:
+    # Force deployment on the worker node with our PV
+    nodeSelector:
+      kubernetes.io/hostname: worker0
+
+    # Add tolerations to ensure it doesn't run on control plane
+    tolerations: []
+
+    # Add affinity to prefer worker nodes
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values:
+                    - worker0
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClassName: local-storage
+
+# Configure promtail within the stack
+promtail:
+  enabled: true
+  config:
+    clients:
+      - url: http://{{ .Release.Name }}-loki:3100/loki/api/v1/push
+
+grafana:
+  enabled: false  # We use the dedicated Grafana chart
+
+# Standalone Grafana configuration
+# DUPLICATE SECTION - COMMENTED OUT: grafana:
+#   enabled: true
+#   resources:
+#     requests:
+#       cpu: 100m
+#       memory: 128Mi
+#     limits:
+#       cpu: 300m
+#       memory: 256Mi
+#
+#   # Force deployment on the worker node with our PV
+#   nodeSelector:
+#     kubernetes.io/hostname: worker0
+#
+#   # Default admin credentials
+#   adminUser: admin
+#   adminPassword: monad-admin-pw
+#
+#   # Let our manual PVC handle persistence
+#   persistence:
+#     enabled: false
+#
+#   ingress:
+#     enabled: true
+#     ingressClassName: nginx
+#     annotations:
+#       nginx.ingress.kubernetes.io/rewrite-target: /$1
+#       nginx.ingress.kubernetes.io/use-regex: "true"
+#     hosts:
+#       - grafana.local
+#     path: /?(.*)
+#     pathType: Prefix
+#
+#   # Configure Loki as a datasource
+#   datasources:
+#     datasources.yaml:
+#       apiVersion: 1
+#       datasources:
+#         - name: Loki
+#           type: loki
+#           url: http://{{ .Release.Name }}-loki:3100
+#           access: proxy
+#           isDefault: true
+#         - name: Prometheus
+#           type: prometheus
+#           url: http://prometheus-server.monitoring.svc.cluster.local:80
+#           access: proxy
+#           isDefault: false
+#
+#   # Dashboards to provision
+#   dashboardProviders:
+#     dashboardproviders.yaml:
+#       apiVersion: 1
+#       providers:
+#         - name: 'default'
+#           orgId: 1
+#           folder: ''
+#           type: file
+#           disableDeletion: false
+#           editable: true
+#           options:
+#             path: /var/lib/grafana/dashboards/default
+#
+# # MinIO configuration
+minio:
+  enabled: true
+
+  # Access credentials
+  rootUser: "minioadmin"
+  rootPassword: "minioadmin"
+
+  # Enable the MinIO console
+  console:
+    enabled: true
+
+  # Only need one replica for development
+  mode: standalone
+  replicas: 1
+
+  # Resources limits
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+
+  # Create default buckets
+  defaultBuckets: "loki-chunks,terraform-state"
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 9000
+
+  # Persistence configuration (for storing data)
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: local-storage
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/use-regex: "true"
+      nginx.ingress.kubernetes.io/rewrite-target: /$1
+      nginx.ingress.kubernetes.io/proxy-body-size: "500m"
+      nginx.ingress.kubernetes.io/proxy-connect-timeout: "300"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    path: /minio/?(.*)
+    hosts:
+      - grafana.local
+    api:
+      annotations:
+        nginx.ingress.kubernetes.io/proxy-body-size: "500m"
+      path: /minio-api/?(.*)
+
+  # Console ingress
+  consoleIngress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/use-regex: "true"
+      nginx.ingress.kubernetes.io/rewrite-target: /$1
+      nginx.ingress.kubernetes.io/proxy-body-size: "500m"
+    path: /minio-console/?(.*)
+    hosts:
+      - grafana.local
+
+# Init job configuration for PV setup
+initJob:
+  enabled: true
+  image: "busybox:latest"
+  imagePullPolicy: "IfNotPresent"
+
+# Template configuration - controls which templates are active
+templates:
+  pv: true  # Enable PVs for local-storage (required)

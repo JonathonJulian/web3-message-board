@@ -1,0 +1,7 @@
+# Ignore syntax errors caused by Go template expressions
+*(syntax)
+
+# Ignore indentation issues inside YAML blocks with template expressions
+{{*}}
+{{-*}}
+*{{*}}*
