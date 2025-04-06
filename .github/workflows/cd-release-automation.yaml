@@ -51,8 +51,8 @@ jobs:
   analyze-commits:
     runs-on: ubuntu-latest
     outputs:
-      release_type: ${{ steps.analyze.outputs.release_type }}
-      has_new_commits: ${{ steps.analyze.outputs.has_new_commits }}
+      release_type: ${{ steps.determine_type.outputs.release_type }}
+      has_new_commits: ${{ steps.check_commits.outputs.has_new_commits }}
     if: github.event_name == 'push'
     steps:
       - name: Checkout code
@@ -61,25 +61,53 @@ jobs:
           fetch-depth: 0
           token: ${{ github.token }}
 
-      - name: Analyze commits for release type
-        id: analyze
-        uses: TriPSs/conventional-changelog-action@v3
-        with:
-          github-token: ${{ github.token }}
-          skip-version-file: true
-          skip-git-pull: true
-          skip-commit: true
-          output-file: false
-
-      - name: Set has_new_commits output
-        id: set_outputs
+      - name: Check for new commits
+        id: check_commits
         run: |
-          if [ "${{ steps.analyze.outputs.skipped }}" == "true" ]; then
-            echo "has_new_commits=false" >> $GITHUB_OUTPUT
-          else
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $LATEST_TAG"
+
+          # Get commit count since the latest tag
+          COMMIT_COUNT=$(git rev-list --count $LATEST_TAG..HEAD)
+          echo "Found $COMMIT_COUNT new commits since $LATEST_TAG"
+
+          # Set output based on commit count
+          if [ "$COMMIT_COUNT" -gt 0 ]; then
             echo "has_new_commits=true" >> $GITHUB_OUTPUT
-            echo "release_type=${{ steps.analyze.outputs.type }}" >> $GITHUB_OUTPUT
+            echo "Found new commits. Will proceed with release."
+          else
+            echo "has_new_commits=false" >> $GITHUB_OUTPUT
+            echo "No new commits found. Will skip release."
           fi
+
+      - name: Determine release type from commits
+        id: determine_type
+        if: steps.check_commits.outputs.has_new_commits == 'true'
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+
+          # Get commit messages since the latest tag
+          COMMITS=$(git log --pretty=format:"%s" $LATEST_TAG..HEAD)
+
+          # Check for breaking changes
+          if echo "$COMMITS" | grep -q -i "BREAKING CHANGE:" || echo "$COMMITS" | grep -q -i "^break:" || echo "$COMMITS" | grep -q -i "^breaking:"; then
+            echo "Found breaking changes - this is a MAJOR release"
+            echo "release_type=major" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check for features
+          if echo "$COMMITS" | grep -q -i "^feat:" || echo "$COMMITS" | grep -q -i "^feature:"; then
+            echo "Found new features - this is a MINOR release"
+            echo "release_type=minor" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Default to patch
+          echo "No breaking changes or features found - this is a PATCH release"
+          echo "release_type=patch" >> $GITHUB_OUTPUT
 
   # Determine and bump the version
   determine-version:
@@ -89,8 +117,8 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && needs.analyze-commits.outputs.has_new_commits == 'true')
     outputs:
-      version: ${{ steps.bump-version.outputs.new_version }}
-      tag: ${{ steps.bump-version.outputs.new_tag }}
+      version: ${{ steps.set_version.outputs.version }}
+      tag: ${{ steps.set_version.outputs.tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -112,30 +140,71 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
-      # Otherwise use automatic versioning
-      - name: Bump version and create tag
-        id: bump-version
+      # Calculate version bump based on commit analysis
+      - name: Calculate version bump
+        id: calculate_version
         if: github.event.inputs.version == ''
-        uses: mathieudutour/github-tag-action@v6.1
-        with:
-          github_token: ${{ github.token }}
-          default_bump: ${{ needs.analyze-commits.outputs.release_type || github.event.inputs.release_type || 'patch' }}
-          release_branches: main
-          create_annotated_tag: true
-          tag_prefix: v
-          dry_run: true
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $LATEST_TAG"
+
+          # Remove 'v' prefix if present
+          CURRENT_VERSION=${LATEST_TAG#v}
+          echo "Current version: $CURRENT_VERSION"
+
+          # Split version into components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
+          # Default to manual input for workflow_dispatch or analyzed type for push
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            RELEASE_TYPE="${{ github.event.inputs.release_type }}"
+          else
+            RELEASE_TYPE="${{ needs.analyze-commits.outputs.release_type }}"
+          fi
+
+          # Convert to lowercase
+          RELEASE_TYPE=$(echo "$RELEASE_TYPE" | tr '[:upper:]' '[:lower:]')
+          echo "Using release type: $RELEASE_TYPE"
+
+          # Calculate new version
+          if [ "$RELEASE_TYPE" == "major" ]; then
+            NEW_MAJOR=$((MAJOR + 1))
+            NEW_MINOR=0
+            NEW_PATCH=0
+          elif [ "$RELEASE_TYPE" == "minor" ]; then
+            NEW_MAJOR=$MAJOR
+            NEW_MINOR=$((MINOR + 1))
+            NEW_PATCH=0
+          else
+            NEW_MAJOR=$MAJOR
+            NEW_MINOR=$MINOR
+            NEW_PATCH=$((PATCH + 1))
+          fi
+
+          NEW_VERSION="$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
+          echo "New version: $NEW_VERSION"
+
+          # Set outputs
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
 
       # Use the correct version output
       - name: Set final version
         id: set_version
         run: |
           if [ "${{ github.event.inputs.version }}" != "" ]; then
+            echo "Using manually provided version"
             echo "version=${{ steps.manual_version.outputs.version }}" >> $GITHUB_OUTPUT
             echo "tag=${{ steps.manual_version.outputs.tag }}" >> $GITHUB_OUTPUT
           else
-            echo "version=${{ steps.bump-version.outputs.new_version }}" >> $GITHUB_OUTPUT
-            echo "tag=${{ steps.bump-version.outputs.new_tag }}" >> $GITHUB_OUTPUT
+            echo "Using calculated version"
+            echo "version=${{ steps.calculate_version.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ steps.calculate_version.outputs.tag }}" >> $GITHUB_OUTPUT
           fi
+
+          echo "Final version: $(cat $GITHUB_OUTPUT | grep version | cut -d= -f2)"
+          echo "Final tag: $(cat $GITHUB_OUTPUT | grep tag | cut -d= -f2)"
 
   # Prepare the release
   prepare:
@@ -154,6 +223,11 @@ jobs:
           fetch-depth: 0
           token: ${{ github.token }}
 
+      - name: Show version information
+        run: |
+          echo "Preparing release version: ${{ needs.determine-version.outputs.version }}"
+          echo "Release tag: ${{ needs.determine-version.outputs.tag }}"
+
       - name: Create release branch
         id: create-branch
         uses: peterjgrainger/action-create-branch@v2.2.0
@@ -168,27 +242,72 @@ jobs:
           ref: "release/v${{ needs.determine-version.outputs.version }}"
 
       - name: Update version in package files
-        uses: EndBug/add-and-commit@v9
-        with:
-          add: "**/package.json"
-          author_name: "GitHub Actions"
-          author_email: "actions@github.com"
-          message: "chore: bump version to ${{ needs.determine-version.outputs.version }}"
-          push: true
-          default_author: github_actions
-          pathspec_error_handling: ignore
+        run: |
+          VERSION="${{ needs.determine-version.outputs.version }}"
 
-      - name: Generate release notes
-        uses: release-drafter/release-drafter@v5
-        with:
-          tag: ${{ needs.determine-version.outputs.tag }}
-          name: "Release ${{ needs.determine-version.outputs.tag }}"
-          version: ${{ needs.determine-version.outputs.version }}
-          disable-autolabeler: true
-          commitish: "release/v${{ needs.determine-version.outputs.version }}"
-          config-name: release-drafter.yml
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+          # Update frontend package.json if it exists
+          if [ -f "frontend/package.json" ]; then
+            echo "Updating frontend/package.json"
+            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" frontend/package.json
+            git add frontend/package.json
+          fi
+
+          # Update API package.json if it exists
+          if [ -f "api/package.json" ]; then
+            echo "Updating api/package.json"
+            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" api/package.json
+            git add api/package.json
+          fi
+
+          # Update root package.json if it exists
+          if [ -f "package.json" ]; then
+            echo "Updating root package.json"
+            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
+            git add package.json
+          fi
+
+          # Commit changes
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git commit -m "chore: bump version to $VERSION" || echo "No changes to commit"
+          git push origin "release/v$VERSION"
+
+      - name: Create release notes
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+
+          # Generate release notes file
+          echo "## Release ${{ needs.determine-version.outputs.tag }}" > release_notes.md
+          echo "" >> release_notes.md
+          echo "### Changes since $LATEST_TAG" >> release_notes.md
+          echo "" >> release_notes.md
+
+          # Get all commits
+          ALL_COMMITS=$(git log --pretty=format:"%s (%h)" $LATEST_TAG..HEAD)
+
+          # Features section
+          echo "#### Features" >> release_notes.md
+          echo "$ALL_COMMITS" | grep -i "^feat" | while read -r line; do
+            echo "* $line" >> release_notes.md
+          done || true
+          echo "" >> release_notes.md
+
+          # Bug fixes section
+          echo "#### Bug Fixes" >> release_notes.md
+          echo "$ALL_COMMITS" | grep -i "^fix" | while read -r line; do
+            echo "* $line" >> release_notes.md
+          done || true
+          echo "" >> release_notes.md
+
+          # Other changes section
+          echo "#### Other Changes" >> release_notes.md
+          echo "$ALL_COMMITS" | grep -v -E "^feat|^fix" | while read -r line; do
+            echo "* $line" >> release_notes.md
+          done || true
+
+          # Show release notes content
+          cat release_notes.md
 
   # Trigger component builds
   trigger-builds:
@@ -210,14 +329,10 @@ jobs:
           event-type: start-frontend-build
           client-payload: '{"version": "${{ needs.prepare.outputs.version }}", "actor": "${{ needs.prepare.outputs.actor }}", "create_release": false}'
 
-      - name: Build Triggers Summary
-        uses: Sibz/github-status-action@v1
-        with:
-          authToken: ${{ github.token }}
-          context: 'Component Builds'
-          description: 'API and Frontend builds triggered'
-          state: 'success'
-          sha: ${{ github.sha }}
+      - name: Record build information
+        run: |
+          echo "API build triggered for version ${{ needs.prepare.outputs.version }}"
+          echo "Frontend build triggered for version ${{ needs.prepare.outputs.version }}"
 
   # Wait for component builds to complete
   wait-for-builds:
@@ -259,7 +374,19 @@ jobs:
       - name: List collected artifacts
         run: |
           echo "Downloaded artifacts:"
-          find ./artifacts -type f | sort
+          mkdir -p ./artifacts
+          find ./artifacts -type f | sort || echo "No artifacts found"
+
+      - name: Create tag if it doesn't exist
+        run: |
+          # Check if tag exists
+          if ! git ls-remote --tags origin | grep -q "refs/tags/${{ needs.prepare.outputs.tag }}"; then
+            echo "Tag ${{ needs.prepare.outputs.tag }} does not exist, creating it now"
+            git tag ${{ needs.prepare.outputs.tag }}
+            git push origin ${{ needs.prepare.outputs.tag }}
+          else
+            echo "Tag ${{ needs.prepare.outputs.tag }} already exists"
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -275,18 +402,15 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Generate release summary
-        uses: peter-evans/create-or-update-comment@v2
-        with:
-          issue-number: 1
-          body: |
-            ## 🚀 Release ${{ needs.prepare.outputs.tag }} is now available
-
-            Version ${{ needs.prepare.outputs.version }} has been released with all components:
-
-            - API
-            - Frontend
-
-            [View the release](https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.tag }})
+        run: |
+          echo "## 🚀 Release ${{ needs.prepare.outputs.tag }} Created" >> $GITHUB_STEP_SUMMARY
+          echo "Version ${{ needs.prepare.outputs.version }} has been released successfully." >> $GITHUB_STEP_SUMMARY
+          echo "- Tag created: ${{ needs.prepare.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Release branch: release/v${{ needs.prepare.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts collected and attached to release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "View the release at:" >> $GITHUB_STEP_SUMMARY
+          echo "https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
 
   # Deploy artifacts if requested
   deploy:
@@ -309,11 +433,12 @@ jobs:
           echo "Deploying version ${{ needs.prepare.outputs.version }} to staging environment"
           # Add your deployment commands here
 
-      - name: Notify deployment
-        uses: peter-evans/create-or-update-comment@v2
-        with:
-          issue-number: 1
-          body: |
-            ## 🚀 Deployment Complete
-
-            Version ${{ needs.prepare.outputs.version }} has been deployed to staging.
+      - name: Generate deployment summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏷️ **Version** | v${{ needs.prepare.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌐 **Environment** | Staging |" >> $GITHUB_STEP_SUMMARY
+          echo "| 👤 **Deployed by** | @${{ needs.prepare.outputs.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🕒 **Deployment Date** | $(date) |" >> $GITHUB_STEP_SUMMARY
