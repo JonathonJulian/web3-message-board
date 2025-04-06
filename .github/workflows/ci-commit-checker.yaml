@@ -22,6 +22,18 @@ jobs:
           # Get all commits in this PR
           PR_COMMITS=$(git log --format="%H" origin/main..HEAD)
 
+          # Debugging output
+          echo "Found commits between origin/main and HEAD:"
+          git log --oneline origin/main..HEAD || echo "No commits found in range"
+
+          # Show main branch
+          echo "Main branch commit:"
+          git log -n 1 --oneline origin/main || echo "Couldn't access main branch"
+
+          # Show current HEAD
+          echo "Current HEAD commit:"
+          git log -n 1 --oneline HEAD || echo "Couldn't access HEAD"
+
           # Initialize counters
           TOTAL_COMMITS=0
           VALID_COMMITS=0
