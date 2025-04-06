@@ -1,0 +1,44 @@
+config:
+  target: "{{ $processEnvironment.FRONTEND_URL || 'http://192.168.1.75' }}"
+  processor: "./processors.js"
+  # Import common configuration from parent
+  phases: "${config.phases}"
+  environments: "${config.environments}"
+  plugins: "${config.plugins}"
+  ensure: "${config.ensure}"
+
+scenarios:
+  - name: "Frontend page load test"
+    flow:
+      # Load homepage
+      - get:
+          url: "/"
+          expect:
+            - statusCode: 200
+              contentType: "text/html"
+
+      # Load static assets (simulate browser behavior)
+      - get:
+          url: "/static/css/main.css"
+          expect:
+            - statusCode: 200
+      - get:
+          url: "/static/js/main.js"
+          expect:
+            - statusCode: 200
+
+      # Simulate user navigation
+      - get:
+          url: "/dashboard"
+          expect:
+            - statusCode: 200
+      - get:
+          url: "/items"
+          expect:
+            - statusCode: 200
+
+      # Test error page
+      - get:
+          url: "/nonexistent-page-{{ $randomString(4) }}"
+          expect:
+            - statusCode: 404

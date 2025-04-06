@@ -1,0 +1,53 @@
+config:
+  # Target environment (can be overridden with environment variables)
+  target: "{{ $processEnvironment.TARGET_URL || 'http://192.168.1.75' }}"
+  phases:
+    - duration: 60  # Test for 1 minute
+      arrivalRate: 5  # Start with 5 users per second
+      rampTo: 20      # Ramp up to 20 users per second
+      name: "Warm up phase"
+    - duration: 120  # Test for 2 minutes
+      arrivalRate: 20  # 20 users per second
+      name: "Sustained load phase"
+    - duration: 60   # Test for 1 minute
+      arrivalRate: 20  # Start with 20 users per second
+      rampTo: 50      # Ramp up to 50 users per second
+      name: "Peak load phase"
+  # Default headers for all requests
+  defaults:
+    headers:
+      User-Agent: "Artillery Load Test"
+  # Plugins to use
+  plugins:
+    expect: {}  # Enable response validation
+
+  # Global variables
+  variables:
+    baseUrl: "{{ target }}"
+
+  # Environment variables to inherit
+  environments:
+    # Load testing in low resource environment
+    low:
+      phases:
+        - duration: 30
+          arrivalRate: 2
+          rampTo: 5
+          name: "Low resource testing"
+
+    # Quick test for debugging
+    quick:
+      phases:
+        - duration: 10
+          arrivalRate: 1
+          rampTo: 3
+          name: "Quick test"
+
+  # Success criteria
+  ensure:
+    thresholds:
+      - "http.response_time.p99": 1500  # 99% of requests should be under 1.5s
+      - "http.response_time.p95": 1000  # 95% of requests should be under 1s
+      - "http.response_time.median": 300  # Median should be under 300ms
+      - "http.codes.200": 95  # At least 95% of responses should be 200
+      - "vusers.failed": 5    # No more than 5% of users should fail

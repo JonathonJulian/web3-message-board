@@ -1,0 +1,69 @@
+config:
+  target: "{{ $processEnvironment.API_URL || 'http://192.168.1.75' }}"
+  processor: "./processors.js"
+  # Import common configuration from parent
+  phases: "${config.phases}"
+  environments: "${config.environments}"
+  plugins: "${config.plugins}"
+  ensure: "${config.ensure}"
+
+scenarios:
+  - name: "API endpoints load test"
+    flow:
+      # Endpoint: Health check
+      - get:
+          url: "/health"
+          expect:
+            - statusCode: 200
+              "Content-Type": "application/json"
+          capture:
+            - json: "$.status"
+              as: "healthStatus"
+      # Endpoint: Get all items
+      - get:
+          url: "/api/items"
+          expect:
+            - statusCode: 200
+              "Content-Type": "application/json"
+      # Endpoint: Create new item
+      - post:
+          url: "/api/items"
+          json:
+            name: "Load Test Item {{ $randomString(8) }}"
+            description: "Created during load testing"
+          capture:
+            - json: "$.id"
+              as: "itemId"
+          expect:
+            - statusCode: 201
+      # Endpoint: Get single item
+      - get:
+          url: "/api/items/{{ itemId }}"
+          expect:
+            - statusCode: 200
+      # Endpoint: Update item
+      - put:
+          url: "/api/items/{{ itemId }}"
+          json:
+            name: "Updated Item {{ $randomString(8) }}"
+            description: "Updated during load testing"
+          expect:
+            - statusCode: 200
+      # Endpoint: Delete item
+      - delete:
+          url: "/api/items/{{ itemId }}"
+          expect:
+            - statusCode: [200, 204]
+
+  # Test logging endpoints
+  - name: "Logging endpoints load test"
+    weight: 2  # Run this scenario 2x less frequently than the main API test
+    flow:
+      # Generate logs
+      - post:
+          url: "/api/log"
+          json:
+            message: "Load test log message {{ $randomString(16) }}"
+            level: "{{ $randomPickOne(['info', 'warning', 'error']) }}"
+          expect:
+            - statusCode: 200
