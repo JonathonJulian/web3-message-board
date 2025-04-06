@@ -1,0 +1,373 @@
+---
+name: Build Frontend
+run-name: Frontend Build ${{ github.event_name == 'repository_dispatch' && format('v{0}', github.event.client_payload.version) || github.event.inputs.image_tag != '' && format('v{0}', github.event.inputs.image_tag) || startsWith(github.ref, 'refs/tags/') && github.ref_name || github.ref == 'refs/heads/main' && 'from main' || 'PR build' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      node_version:
+        description: 'Node.js version to use'
+        required: false
+        default: '18'
+      image_tag:
+        description: 'Version to use for this build'
+        required: false
+        default: ''
+        type: string
+      build_arm:
+        description: 'Build for ARM64 architecture (ignored for frontend, static content is platform-independent)'
+        required: false
+        default: false
+        type: boolean
+  repository_dispatch:
+    types: [start-frontend-build]
+
+jobs:
+  build-frontend:
+    name: Build Frontend
+    # Static HTML/JS doesn't need architecture-specific builds
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      actor: ${{ steps.get_version.outputs.actor }}
+      tag_name: ${{ steps.get_version.outputs.tag_name }}
+      create_release: ${{ steps.get_version.outputs.create_release }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Frontend directory
+        id: check_frontend
+        run: |
+          # Check if frontend directory exists
+          if [ ! -d "frontend" ]; then
+            echo "::warning::Frontend directory not found in root folder"
+
+            # Check possible locations
+            if [ -d "src/frontend" ]; then
+              echo "::notice::Found Frontend in src/frontend, creating symlink"
+              ln -s src/frontend frontend
+            elif [ -d "client" ]; then
+              echo "::notice::Found client directory, using it as Frontend"
+              ln -s client frontend
+            elif [ -d "ui" ]; then
+              echo "::notice::Found ui directory, using it as Frontend"
+              ln -s ui frontend
+            else
+              echo "::error::Could not find Frontend directory"
+              exit 1
+            fi
+          fi
+
+          # Determine package manager type
+          if [ -f "frontend/package-lock.json" ]; then
+            echo "::notice::Using npm package manager"
+            PKG_MANAGER="npm"
+          elif [ -f "frontend/yarn.lock" ]; then
+            echo "::notice::Using yarn package manager"
+            PKG_MANAGER="yarn"
+          elif [ -f "frontend/pnpm-lock.yaml" ]; then
+            echo "::notice::Using pnpm package manager"
+            PKG_MANAGER="pnpm"
+          else
+            echo "::warning::No lock file found, defaulting to npm"
+            PKG_MANAGER="npm"
+          fi
+
+          echo "pkg_manager=$PKG_MANAGER" >> $GITHUB_OUTPUT
+          echo "✅ Frontend directory validated"
+
+      - name: Determine version to use
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            # From repository dispatch
+            VERSION="${{ github.event.client_payload.version }}"
+            ACTOR="${{ github.event.client_payload.actor }}"
+            TAG="frontend-v${VERSION}"
+
+            # Check if create_release was explicitly set to false in client payload
+            if [ "${{ github.event.client_payload.create_release }}" = "false" ]; then
+              CREATE_RELEASE="false"
+            else
+              CREATE_RELEASE="true"
+            fi
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # From workflow dispatch
+            if [ "${{ github.event.inputs.image_tag }}" != "" ]; then
+              VERSION="${{ github.event.inputs.image_tag }}"
+            else
+              VERSION="dev"
+            fi
+            ACTOR="${{ github.actor }}"
+            TAG="frontend-v${VERSION}"
+            CREATE_RELEASE="false"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # From tag push
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+            ACTOR="${{ github.actor }}"
+            TAG="${{ github.ref_name }}"
+            CREATE_RELEASE="true"
+          else
+            # Default fallback
+            VERSION=$(date +'%Y.%m.%d.%H%M')
+            ACTOR="${{ github.actor }}"
+            TAG="frontend-v${VERSION}"
+            CREATE_RELEASE="false"
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "actor=$ACTOR" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+          echo "create_release=$CREATE_RELEASE" >> $GITHUB_OUTPUT
+          echo "Using version: $VERSION (Create release: $CREATE_RELEASE)"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version || '18' }}
+
+      # Setup package manager based on what's detected
+      - name: Setup npm cache
+        if: steps.check_frontend.outputs.pkg_manager == 'npm'
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Setup pnpm
+        if: steps.check_frontend.outputs.pkg_manager == 'pnpm'
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9.x
+
+      - name: Get pnpm store directory
+        if: steps.check_frontend.outputs.pkg_manager == 'pnpm'
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        if: steps.check_frontend.outputs.pkg_manager == 'pnpm'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Setup yarn cache
+        if: steps.check_frontend.outputs.pkg_manager == 'yarn'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yarn
+          key: ${{ runner.os }}-yarn-${{ hashFiles('frontend/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+
+          case "${{ steps.check_frontend.outputs.pkg_manager }}" in
+            npm)
+              echo "Installing dependencies with npm"
+              npm ci
+              ;;
+            yarn)
+              echo "Installing dependencies with yarn"
+              yarn install --frozen-lockfile
+              ;;
+            pnpm)
+              echo "Installing dependencies with pnpm"
+              pnpm install --frozen-lockfile
+              ;;
+            *)
+              echo "Using default npm"
+              npm ci
+              ;;
+          esac
+
+      - name: Update version in package.json
+        run: |
+          cd frontend
+
+          case "${{ steps.check_frontend.outputs.pkg_manager }}" in
+            npm)
+              npm version ${{ steps.get_version.outputs.version }} --no-git-tag-version
+              ;;
+            yarn)
+              yarn version --new-version ${{ steps.get_version.outputs.version }} --no-git-tag-version
+              ;;
+            pnpm)
+              pnpm version ${{ steps.get_version.outputs.version }} --no-git-tag-version
+              ;;
+            *)
+              npm version ${{ steps.get_version.outputs.version }} --no-git-tag-version
+              ;;
+          esac
+
+      - name: Build frontend
+        run: |
+          cd frontend
+
+          case "${{ steps.check_frontend.outputs.pkg_manager }}" in
+            npm)
+              echo "Building with npm"
+              npm run build
+              ;;
+            yarn)
+              echo "Building with yarn"
+              yarn build
+              ;;
+            pnpm)
+              echo "Building with pnpm"
+              pnpm run build
+              ;;
+            *)
+              echo "Building with npm (default)"
+              npm run build
+              ;;
+          esac
+
+      - name: Create archive
+        run: |
+          cd frontend
+          # Determine the build output directory
+          if [ -d "dist" ]; then
+            BUILD_DIR="dist"
+          elif [ -d "build" ]; then
+            BUILD_DIR="build"
+          elif [ -d "out" ]; then
+            BUILD_DIR="out"
+          else
+            echo "::error::Could not find build output directory"
+            find . -type d -maxdepth 2 | sort
+            exit 1
+          fi
+
+          echo "Using build directory: $BUILD_DIR"
+
+          # Create the tar.gz bundle
+          tar -czf ../frontend-bundle.tar.gz $BUILD_DIR
+
+          # Create artifacts directory
+          mkdir -p ../artifacts
+          cp ../frontend-bundle.tar.gz ../artifacts/
+
+      - name: Generate build summary
+        run: |
+          # Get file sizes for better reporting
+          BUNDLE_SIZE=$(du -h ./frontend-bundle.tar.gz | cut -f1)
+
+          # Write to GitHub step summary
+          {
+            echo "## 🎨 Frontend Build Summary"
+            echo "### 📋 Build Information"
+            echo "| Property | Value |"
+            echo "| --- | --- |"
+            echo "| 🏷️ **Version** | v${{ steps.get_version.outputs.version }} |"
+            echo "| 👤 **Built by** | @${{ steps.get_version.outputs.actor || github.actor }} |"
+            echo "| 🕒 **Build Date** | $(date) |"
+            echo "| 🔄 **Workflow Run** | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo "| 🔀 **Triggered by** | ${{ github.event_name }} |"
+
+            echo "### 📦 Build Artifact"
+            echo "| Name | Size | Status |"
+            echo "| --- | --- | --- |"
+            echo "| 🌐 frontend-bundle.tar.gz | ${BUNDLE_SIZE} | ✅ Success |"
+
+            if [ "${{ steps.get_version.outputs.create_release }}" = "true" ]; then
+              echo "### 📢 Release Status"
+              echo "✅ A GitHub release will be created with tag **${{ steps.get_version.outputs.tag_name }}**"
+            else
+              echo "### 📢 Release Status"
+              echo "ℹ️ No separate release will be created (artifacts will be attached to the main release)"
+            fi
+
+            # Print out some useful stats from the build
+            if [ -f "./frontend/dist/stats.html" ]; then
+              echo "### 📊 Build Statistics"
+              echo "Build statistics are available in the stats.html file in the artifact"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-bundle
+          path: artifacts/frontend-bundle.tar.gz
+          retention-days: 5
+
+  create-release:
+    name: Create Frontend Release
+    needs: build-frontend
+    if: needs.build-frontend.outputs.create_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-bundle
+          path: ./artifacts
+
+      - name: Debug downloaded artifacts
+        run: |
+          echo "Contents of artifacts directory:"
+          ls -la ./artifacts/
+          echo "Current working directory:"
+          pwd
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build-frontend.outputs.tag_name }}
+          name: Frontend v${{ needs.build-frontend.outputs.version }}
+          files: |
+            ./artifacts/frontend-bundle.tar.gz
+          body: |
+            ## 🎨 Frontend Release v${{ needs.build-frontend.outputs.version }}
+
+            ### 📋 Release Information
+            | Property | Value |
+            | --- | --- |
+            | 🏷️ **Version** | v${{ needs.build-frontend.outputs.version }} |
+            | 👤 **Built by** | @${{ needs.build-frontend.outputs.actor || github.actor }} |
+            | 🕒 **Release Date** | $(date) |
+            | 🔄 **Workflow Run** | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            ### 📦 Included Artifacts
+            - **🌐 Frontend Bundle**: `frontend-bundle.tar.gz`
+
+            ### 📝 Deployment Instructions
+            1. Download the frontend bundle
+            2. Extract the contents: `tar -xzf frontend-bundle.tar.gz`
+            3. Deploy the extracted `dist` folder to your web server
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Generate release summary
+        if: success()
+        run: |
+          {
+            echo "## 🎨 Frontend Release Created"
+            echo "### 📋 Release Information"
+            echo "| Property | Value |"
+            echo "| --- | --- |"
+            echo "| 🏷️ **Version** | v${{ needs.build-frontend.outputs.version }} |"
+            echo "| 👤 **Published by** | @${{ needs.build-frontend.outputs.actor || github.actor }} |"
+            echo "| 🔗 **Release URL** | [${{ github.repository }}/releases/tag/${{ needs.build-frontend.outputs.tag_name }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.build-frontend.outputs.tag_name }}) |"
+            echo "| 📦 **Artifacts** | 1 bundle attached |"
+          } >> "$GITHUB_STEP_SUMMARY"
