@@ -15,6 +15,11 @@ on:
         required: false
         default: ''
         type: string
+      create_release:
+        description: 'Create a GitHub release'
+        required: false
+        default: false
+        type: boolean
   repository_dispatch:
     types: [start-frontend-build]
 
@@ -61,7 +66,13 @@ jobs:
             fi
             ACTOR="${{ github.actor }}"
             TAG="frontend-v${VERSION}"
-            CREATE_RELEASE="false"
+
+            # Use the create_release input if provided
+            if [ "${{ github.event.inputs.create_release }}" = "true" ]; then
+              CREATE_RELEASE="true"
+            else
+              CREATE_RELEASE="false"
+            fi
           fi
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
