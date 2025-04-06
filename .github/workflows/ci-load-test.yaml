@@ -1,0 +1,163 @@
+---
+name: Load Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ip:
+        description: 'IP address of the target VM'
+        required: true
+        default: '192.168.1.94'
+      test_env:
+        description: 'Test environment (quick, low, default)'
+        required: true
+        default: 'quick'
+        type: choice
+        options:
+          - quick
+          - low
+          - default
+      test_type:
+        description: 'Tests to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - frontend
+          - api
+
+jobs:
+  load-test:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Artillery
+        run: |
+          echo "Installing Artillery..."
+          sudo npm install -g artillery
+          artillery --version
+
+      - name: Run Load Tests
+        id: run_tests
+        env:
+          TARGET_HOST: ${{ github.event.inputs.target_ip }}
+          FRONTEND_URL: "http://${{ github.event.inputs.target_ip }}"
+          API_URL: "http://${{ github.event.inputs.target_ip }}"
+          TEST_ENV: ${{ github.event.inputs.test_env }}
+        run: |
+          echo "Running load tests against ${TARGET_HOST} with environment ${TEST_ENV}"
+
+          # Determine which tests to run
+          TEST_ARGS=""
+          case "${{  github.event.inputs.test_type  }}" in
+            "frontend")
+              TEST_ARGS="--frontend"
+              ;;
+            "api")
+              TEST_ARGS="--api"
+              ;;
+            *)
+              TEST_ARGS=""
+              ;;
+          esac
+
+          # Capture test output to parse for analysis
+          cd tests/load
+          bash run_load_tests.sh --env "${TEST_ENV}" "${TEST_ARGS}" | tee load_test_output.log
+
+          # Store exit code to use later
+          echo "TEST_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## Load Test Summary" > load_test_summary.md
+
+          {
+            echo ""
+
+            # Extract overall status
+            if [ "${{  env.TEST_EXIT_CODE  }}" == "0" ]; then
+              echo "✅ **All load tests passed successfully!**"
+            else
+              echo "❌ **Some load tests failed!**"
+            fi
+
+            echo ""
+            echo "### Configuration"
+            echo ""
+            echo "- **Target IP:** ${{  github.event.inputs.target_ip  }}"
+            echo "- **Environment:** ${{  github.event.inputs.test_env  }}"
+            echo "- **Test Type:** ${{  github.event.inputs.test_type  }}"
+
+            echo ""
+            echo "### Response Statistics"
+            echo ""
+          } >> load_test_summary.md
+
+          # Extract response time stats if available
+          if grep -q "p95=" tests/load/load_test_output.log; then
+            {
+              echo "**Response times:**"
+              echo '```'
+              grep -A 20 "Response time" tests/load/load_test_output.log | grep -v "vusers"
+              echo '```'
+            } >> load_test_summary.md
+          fi
+
+          {
+            echo ""
+            echo "### HTTP Response Codes"
+            echo ""
+          } >> load_test_summary.md
+
+          # Extract HTTP codes if available
+          if grep -q "http.codes" tests/load/load_test_output.log; then
+            {
+              echo '```'
+              grep -A 10 "http.codes" tests/load/load_test_output.log | grep -v "vusers"
+              echo '```'
+            } >> load_test_summary.md
+          fi
+
+          cat load_test_summary.md
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: |
+            tests/load/load_test_output.log
+            load_test_summary.md
+
+      - name: Post test summary
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('load_test_summary.md', 'utf8');
+            await core.summary
+              .addRaw(summary)
+              .write();
+
+      - name: Exit with test result
+        if: always()
+        run: |
+          # Convert test exit code to a valid shell exit value (0 or 1)
+          if [[ "${{  env.TEST_EXIT_CODE  }}" != "0" ]]; then
+            echo "Load tests failed with exit code ${{  env.TEST_EXIT_CODE  }}"
+            exit 1
+          else
+            echo "Load tests passed"
+            exit 0
+          fi

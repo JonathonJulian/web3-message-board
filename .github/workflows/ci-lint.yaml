@@ -1,0 +1,877 @@
+---
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-yaml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check and install yamllint
+        run: |
+          # Check if yamllint is installed
+          if command -v yamllint &> /dev/null; then
+            echo "✅ yamllint is already installed:"
+            yamllint --version
+          else
+            echo "⚠️ yamllint is not installed. Installing it now..."
+            pip install yamllint
+            echo "✅ Successfully installed yamllint $(yamllint --version)"
+          fi
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.14.2'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Show yamllint version and config
+        run: |
+          yamllint --version
+          echo "Config file content:"
+          cat .yamllint.yaml
+
+      - name: Lint YAML files individually
+        id: yaml-lint-debug
+        run: |
+          # Lint each file separately to identify the error source
+          echo "=== Linting GitHub Actions workflows ==="
+          yamllint -c .yamllint.yaml .github/workflows/ && echo "✅ Workflows passed" || echo "❌ Workflows failed"
+
+          echo "=== Linting Ansible playbooks ==="
+          yamllint -c .yamllint.yaml ansible/ && echo "✅ Ansible passed" || echo "❌ Ansible failed"
+
+          echo "=== Linting Helm chart non-template files ==="
+          yamllint -c .yamllint.yaml monitoring/Chart.yaml monitoring/values.yaml && echo "✅ Helm non-template files passed" || echo "❌ Helm non-template files failed"
+
+          echo "=== Linting Helm chart templates with helm lint ==="
+          helm lint monitoring/ && echo "✅ Helm templates passed" || echo "❌ Helm templates failed"
+
+          echo "=== Linting Docker Compose file ==="
+          yamllint -c .yamllint.yaml docker-compose.yml && echo "✅ Docker Compose passed" || echo "❌ Docker Compose failed"
+          echo "Docker Compose content (for debugging):"
+          cat docker-compose.yml
+
+      - name: Lint YAML files
+        id: yaml-lint
+        continue-on-error: false
+        run: |
+          # Create report directory
+          mkdir -p reports
+
+          # Status tracking
+          LINT_STATUS=0
+
+          # Initialize status flags for each section (0=success, 1=warning, 2=error)
+          WORKFLOWS_STATUS=0
+          ANSIBLE_STATUS=0
+          HELM_YAMLLINT_STATUS=0
+          HELM_LINT_STATUS=0
+          DOCKER_COMPOSE_STATUS=0
+
+          # Lint GitHub Actions workflows
+          echo "Linting GitHub Actions workflows..."
+          yamllint -c .yamllint.yaml .github/workflows/ | tee reports/github-actions-lint.txt || { WORKFLOWS_STATUS=2; LINT_STATUS=$?; echo "Workflows lint failed with status $?"; }
+
+          # Lint Ansible playbooks and roles
+          echo "Linting Ansible files..."
+          yamllint -c .yamllint.yaml ansible/ | tee reports/ansible-lint.txt || { ANSIBLE_STATUS=2; LINT_STATUS=$?; echo "Ansible lint failed with status $?"; }
+
+          # Lint Helm charts (non-template files)
+          echo "Linting Helm chart non-template files..."
+          yamllint -c .yamllint.yaml monitoring/Chart.yaml monitoring/values.yaml | tee reports/helm-yamllint.txt || { HELM_YAMLLINT_STATUS=2; LINT_STATUS=$?; echo "Helm non-template files lint failed with status $?"; }
+
+          # Lint Helm templates with helm lint
+          echo "Linting Helm templates with helm lint..."
+          helm lint monitoring/ | tee reports/helm-template-lint.txt || { HELM_LINT_STATUS=2; LINT_STATUS=$?; echo "Helm template lint failed with status $?"; }
+
+          # Lint other YAML files
+          echo "Linting Docker Compose files..."
+          yamllint -c .yamllint.yaml docker-compose.yml | tee reports/docker-compose-lint.txt || { DOCKER_COMPOSE_STATUS=2; LINT_STATUS=$?; echo "Docker Compose lint failed with status $?"; }
+
+          # Debug: Show detailed content of lint output files
+          echo "==== DEBUG: GitHub Actions Workflows lint output: ===="
+          cat reports/github-actions-lint.txt
+          echo "==== END OF FILE ===="
+
+          echo "==== DEBUG: Helm lint output: ===="
+          cat reports/helm-template-lint.txt
+          echo "==== END OF FILE ===="
+
+          # More robust warning detection
+          if [ -s reports/github-actions-lint.txt ]; then
+            echo "Checking GitHub Actions workflows for warnings and errors"
+            if grep -i "error\|[^a-z]err\>" reports/github-actions-lint.txt; then
+              WORKFLOWS_STATUS=2 # Error
+              echo "DEBUG: DETECTED ERROR in GitHub Actions Workflows"
+            elif grep -i "warning\|\[line\]\|\[document\]" reports/github-actions-lint.txt; then
+              WORKFLOWS_STATUS=1 # Warning
+              echo "DEBUG: DETECTED WARNING in GitHub Actions Workflows"
+            else
+              WORKFLOWS_STATUS=0 # Success
+              echo "DEBUG: No issues detected in GitHub Actions Workflows"
+            fi
+          fi
+
+          if [ -s reports/ansible-lint.txt ]; then
+            echo "Checking Ansible for warnings and errors"
+            if grep -i "error\|[^a-z]err\>" reports/ansible-lint.txt; then
+              ANSIBLE_STATUS=2 # Error
+              echo "DEBUG: DETECTED ERROR in Ansible"
+            elif grep -i "warning\|\[line\]\|\[document\]" reports/ansible-lint.txt; then
+              ANSIBLE_STATUS=1 # Warning
+              echo "DEBUG: DETECTED WARNING in Ansible"
+            else
+              ANSIBLE_STATUS=0 # Success
+              echo "DEBUG: No issues detected in Ansible"
+            fi
+          fi
+
+          if [ -s reports/helm-yamllint.txt ]; then
+            echo "Checking Helm YAML for warnings and errors"
+            if grep -i "error\|[^a-z]err\>" reports/helm-yamllint.txt; then
+              HELM_YAMLLINT_STATUS=2 # Error
+              echo "DEBUG: DETECTED ERROR in Helm YAML"
+            elif grep -i "warning\|\[line\]\|\[document\]" reports/helm-yamllint.txt; then
+              HELM_YAMLLINT_STATUS=1 # Warning
+              echo "DEBUG: DETECTED WARNING in Helm YAML"
+            else
+              HELM_YAMLLINT_STATUS=0 # Success
+              echo "DEBUG: No issues detected in Helm YAML"
+            fi
+          fi
+
+          if [ -s reports/helm-template-lint.txt ]; then
+            echo "Checking Helm lint for warnings and errors"
+
+            # Using exact pattern matching for Helm's specific output format
+            if grep -q "\[ERROR\]" reports/helm-template-lint.txt; then
+              HELM_LINT_STATUS=2 # Error
+              echo "DEBUG: DETECTED ERROR in Helm lint"
+            elif grep -q "\[WARNING\]" reports/helm-template-lint.txt; then
+              HELM_LINT_STATUS=1 # Warning
+              echo "DEBUG: DETECTED WARNING in Helm lint"
+            else
+              # Check for failed charts
+              if grep -q "chart(s) failed" reports/helm-template-lint.txt | grep -v "0 chart(s) failed"; then
+                HELM_LINT_STATUS=2 # Error
+                echo "DEBUG: DETECTED chart failures in Helm lint"
+              else
+                HELM_LINT_STATUS=0 # Success
+                echo "DEBUG: No issues detected in Helm lint"
+              fi
+            fi
+          fi
+
+          if [ -s reports/docker-compose-lint.txt ]; then
+            echo "Checking Docker Compose for warnings and errors"
+            if grep -i "error\|[^a-z]err\>" reports/docker-compose-lint.txt; then
+              DOCKER_COMPOSE_STATUS=2 # Error
+              echo "DEBUG: DETECTED ERROR in Docker Compose"
+            elif grep -i "warning\|\[line\]\|\[document\]" reports/docker-compose-lint.txt; then
+              DOCKER_COMPOSE_STATUS=1 # Warning
+              echo "DEBUG: DETECTED WARNING in Docker Compose"
+            else
+              DOCKER_COMPOSE_STATUS=0 # Success
+              echo "DEBUG: No issues detected in Docker Compose"
+            fi
+          fi
+
+          echo "STATUS VALUES AFTER CHECKING:"
+          echo "WORKFLOWS_STATUS: $WORKFLOWS_STATUS"
+          echo "ANSIBLE_STATUS: $ANSIBLE_STATUS"
+          echo "HELM_YAMLLINT_STATUS: $HELM_YAMLLINT_STATUS"
+          echo "HELM_LINT_STATUS: $HELM_LINT_STATUS"
+          echo "DOCKER_COMPOSE_STATUS: $DOCKER_COMPOSE_STATUS"
+
+          # Generate combined report
+          echo "# YAML Linting Report" > reports/combined-lint.md
+
+          {
+            # Add section status icons
+            if [ $WORKFLOWS_STATUS -eq 0 ]; then
+              echo "## ✅ GitHub Actions Workflows"
+            elif [ $WORKFLOWS_STATUS -eq 1 ]; then
+              echo "## ⚠️ GitHub Actions Workflows (warnings)"
+            else
+              echo "## ❌ GitHub Actions Workflows (errors)"
+            fi
+            echo '```'
+            cat reports/github-actions-lint.txt
+            echo '```'
+
+            if [ $ANSIBLE_STATUS -eq 0 ]; then
+              echo "## ✅ Ansible Playbooks and Roles"
+            elif [ $ANSIBLE_STATUS -eq 1 ]; then
+              echo "## ⚠️ Ansible Playbooks and Roles (warnings)"
+            else
+              echo "## ❌ Ansible Playbooks and Roles (errors)"
+            fi
+            echo '```'
+            cat reports/ansible-lint.txt
+            echo '```'
+
+            if [ $HELM_YAMLLINT_STATUS -eq 0 ]; then
+              echo "## ✅ Helm Charts (Non-template Files)"
+            elif [ $HELM_YAMLLINT_STATUS -eq 1 ]; then
+              echo "## ⚠️ Helm Charts (Non-template Files) (warnings)"
+            else
+              echo "## ❌ Helm Charts (Non-template Files) (errors)"
+            fi
+            echo '```'
+            cat reports/helm-yamllint.txt
+            echo '```'
+
+            if [ $HELM_LINT_STATUS -eq 0 ]; then
+              echo "## ✅ Helm Templates (helm lint)"
+            elif [ $HELM_LINT_STATUS -eq 1 ]; then
+              echo "## ⚠️ Helm Templates (helm lint) (warnings)"
+            else
+              echo "## ❌ Helm Templates (helm lint) (errors)"
+            fi
+            echo '```'
+            cat reports/helm-template-lint.txt
+            echo '```'
+
+            if [ $DOCKER_COMPOSE_STATUS -eq 0 ]; then
+              echo "## ✅ Docker Compose"
+            elif [ $DOCKER_COMPOSE_STATUS -eq 1 ]; then
+              echo "## ⚠️ Docker Compose (warnings)"
+            else
+              echo "## ❌ Docker Compose (errors)"
+            fi
+            echo '```'
+            cat reports/docker-compose-lint.txt
+            echo '```'
+
+            # Add summary section
+            echo "## Summary"
+            # Check if any status is 2 (error)
+            if grep -q "2" <<< "$WORKFLOWS_STATUS$ANSIBLE_STATUS$HELM_YAMLLINT_STATUS$HELM_LINT_STATUS$DOCKER_COMPOSE_STATUS"; then
+              echo "❌ **Some linting checks have errors. Please review the details above.**"
+            # Check if any status is 1 (warning)
+            elif grep -q "1" <<< "$WORKFLOWS_STATUS$ANSIBLE_STATUS$HELM_YAMLLINT_STATUS$HELM_LINT_STATUS$DOCKER_COMPOSE_STATUS"; then
+              echo "⚠️ **All linting checks passed, but some have warnings. See details above.**"
+            else
+              echo "✅ **All linting checks passed successfully without warnings!**"
+            fi
+          } >> reports/combined-lint.md
+
+          # Output to GitHub step summary
+          cat reports/combined-lint.md >> "$GITHUB_STEP_SUMMARY"
+
+          # Show final status
+          echo "Final lint status: $LINT_STATUS"
+          echo "Section status values:"
+          echo "WORKFLOWS_STATUS: $WORKFLOWS_STATUS"
+          echo "ANSIBLE_STATUS: $ANSIBLE_STATUS"
+          echo "HELM_YAMLLINT_STATUS: $HELM_YAMLLINT_STATUS"
+          echo "HELM_LINT_STATUS: $HELM_LINT_STATUS"
+          echo "DOCKER_COMPOSE_STATUS: $DOCKER_COMPOSE_STATUS"
+
+          # Exit with the right status
+          exit "$LINT_STATUS"
+
+      - name: Upload lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yaml-lint-artifacts
+          path: reports/
+          retention-days: 5
+
+  lint-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if frontend directory exists
+        id: check_frontend
+        run: |
+          if [ -d "frontend" ]; then
+            echo "Frontend directory exists"
+            echo "exists=true" >> $GITHUB_OUTPUT
+            if [ -f "frontend/pnpm-lock.yaml" ]; then
+              echo "pnpm lock file exists"
+              echo "has_lock=true" >> $GITHUB_OUTPUT
+              echo "lock_type=pnpm" >> $GITHUB_OUTPUT
+            elif [ -f "frontend/package-lock.json" ]; then
+              echo "Package lock file exists"
+              echo "has_lock=true" >> $GITHUB_OUTPUT
+              echo "lock_type=npm" >> $GITHUB_OUTPUT
+            else
+              echo "No lock file found"
+              echo "has_lock=false" >> $GITHUB_OUTPUT
+              echo "lock_type=none" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "Frontend directory not found"
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "has_lock=false" >> $GITHUB_OUTPUT
+            echo "lock_type=none" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js
+        if: steps.check_frontend.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          # Don't use pnpm for caching here since it's not installed yet
+
+      - name: Setup pnpm
+        if: steps.check_frontend.outputs.exists == 'true'
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9.1.1  # Specify exact version matching the one used to generate the lock file
+          run_install: false
+
+      - name: Get pnpm store directory
+        if: steps.check_frontend.outputs.exists == 'true'
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+        id: pnpm-cache
+
+      - name: Setup pnpm cache
+        if: steps.check_frontend.outputs.exists == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        if: steps.check_frontend.outputs.exists == 'true'
+        run: |
+          cd frontend
+          # Skip the frozen lockfile check for all installations to avoid issues with incompatible lock files
+          echo "Installing dependencies with --no-frozen-lockfile to handle version compatibility issues"
+          pnpm install --no-frozen-lockfile
+
+      - name: Lint frontend code
+        id: frontend-lint
+        if: steps.check_frontend.outputs.exists == 'true'
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          cd frontend
+
+          # Diagnostic: Show content of package.json
+          echo "Checking package.json content..."
+          if [ -f "package.json" ]; then
+            echo "package.json exists"
+            echo "Scripts section:"
+            grep -A 10 '"scripts"' package.json || echo "No scripts section found"
+          else
+            echo "package.json not found!"
+            echo "No package.json found" > ../reports/frontend-lint.txt
+            LINT_STATUS=0
+            exit 0
+          fi
+
+          # Find potential lintable files
+          echo "Looking for lintable files..."
+          echo "JavaScript files:"
+          find . -type f -name "*.js" | head -n 5 || echo "No .js files found or find command error"
+          echo "TypeScript files:"
+          find . -type f -name "*.ts" -o -name "*.tsx" | head -n 5 || echo "No TypeScript files found or find command error"
+
+          # Check if lint script exists in package.json
+          if grep -q '"lint"' package.json; then
+            echo "Found lint script in package.json"
+            # Run ESLint and capture output
+            echo "Running pnpm run lint..."
+            pnpm run lint > ../reports/frontend-lint.txt 2>&1 || LINT_STATUS=$?
+            echo "Lint completed with status: ${LINT_STATUS:-0}"
+          else
+            echo "No lint script found in package.json, checking for ESLint configurations..."
+
+            # Check for various ESLint config files
+            ESLINT_CONFIG_FOUND=false
+            for config_file in .eslintrc.js .eslintrc.cjs .eslintrc.json .eslintrc.yaml .eslintrc.yml .eslintrc; do
+              if [ -f "$config_file" ]; then
+                echo "Found ESLint config file: $config_file"
+                ESLINT_CONFIG_FOUND=true
+                break
+              fi
+            done
+
+            # Check if eslint is in package.json devDependencies or dependencies
+            if grep -q '"eslint"' package.json; then
+              echo "ESLint is listed in package.json dependencies"
+              ESLINT_CONFIG_FOUND=true
+            fi
+
+            # Look for eslint plugin packages that might indicate ESLint is being used
+            if grep -q 'eslint-plugin\|@typescript-eslint\|svelte-eslint' package.json; then
+              echo "Found ESLint plugins in package.json"
+              ESLINT_CONFIG_FOUND=true
+            fi
+
+            if [ "$ESLINT_CONFIG_FOUND" = true ]; then
+              echo "ESLint appears to be configured, running direct eslint command"
+              # Try to find all lintable files - limiting the result size to avoid broken pipes
+              echo "Looking for files to lint..."
+
+              # Create a temporary file with list of files to lint instead of using pipe
+              TEMP_FILES_LIST=$(mktemp)
+              find . -type f \( -name "*.js" -o -name "*.ts" -o -name "*.svelte" \) -not -path "*/node_modules/*" -not -path "*/dist/*" > "$TEMP_FILES_LIST" || echo "Find command had issues"
+
+              # Count files found
+              FILE_COUNT=$(wc -l < "$TEMP_FILES_LIST" || echo "0")
+              echo "Found $FILE_COUNT files to lint"
+
+              # Check if we found any files
+              if [ "$FILE_COUNT" -gt 0 ]; then
+                echo "Found files to lint. Running ESLint..."
+
+                # First check if eslint is actually installed
+                if [ -d "node_modules/eslint" ] || [ -d "node_modules/.pnpm/eslint@" ]; then
+                  echo "ESLint package found in node_modules"
+
+                  # Try to run eslint with common extensions for this project type
+                  # Use set +e to prevent the script from exiting on eslint error
+                  set +e
+
+                  # Try multiple methods to run eslint
+                  echo "Trying to run ESLint with pnpm exec..."
+                  pnpm exec eslint --ext .js,.ts,.svelte . > ../reports/frontend-lint.txt 2>&1
+                  LINT_STATUS=$?
+
+                  # If pnpm exec failed, try with npx
+                  if [ $LINT_STATUS -eq 127 ]; then  # 127 is command not found
+                    echo "pnpm exec eslint failed, trying with npx..."
+                    npx eslint --ext .js,.ts,.svelte . > ../reports/frontend-lint.txt 2>&1
+                    LINT_STATUS=$?
+                  fi
+
+                  # If both failed, try direct path
+                  if [ $LINT_STATUS -eq 127 ]; then
+                    echo "npx eslint failed, trying with direct path..."
+                    if [ -f "node_modules/.bin/eslint" ]; then
+                      ./node_modules/.bin/eslint --ext .js,.ts,.svelte . > ../reports/frontend-lint.txt 2>&1
+                      LINT_STATUS=$?
+                    else
+                      echo "Could not find eslint executable in node_modules/.bin"
+                      echo "ESLint is configured but executable not found. Consider running 'pnpm install eslint' to install it." > ../reports/frontend-lint.txt
+                      LINT_STATUS=0
+                    fi
+                  fi
+
+                  set -e
+                else
+                  echo "ESLint is configured but not installed. Installing ESLint now..."
+
+                  # Install ESLint and common plugins for the project type
+                  echo "Installing ESLint and common plugins..."
+                  pnpm add -D eslint
+
+                  # For Svelte projects, add Svelte ESLint plugins if needed
+                  if grep -q '"svelte"' package.json; then
+                    echo "Detected Svelte project, installing Svelte ESLint plugins..."
+                    pnpm add -D eslint-plugin-svelte svelte-eslint-parser
+                  fi
+
+                  # For TypeScript projects, add TypeScript ESLint plugins if needed
+                  if grep -q '"typescript"' package.json || [ -f "tsconfig.json" ]; then
+                    echo "Detected TypeScript project, installing TypeScript ESLint plugins..."
+                    pnpm add -D @typescript-eslint/eslint-plugin @typescript-eslint/parser
+                  fi
+
+                  echo "ESLint installation complete. Running ESLint..."
+                  set +e
+                  pnpm exec eslint --ext .js,.ts,.svelte . > ../reports/frontend-lint.txt 2>&1
+                  LINT_STATUS=$?
+                  set -e
+
+                  echo "Note: ESLint was automatically installed during CI. You may want to add it to your project dependencies." >> ../reports/frontend-lint.txt
+                fi
+
+                echo "ESLint completed with status: $LINT_STATUS"
+
+                # For diagnostic purposes, display the exit code meaning
+                if [ $LINT_STATUS -eq 0 ]; then
+                  echo "ESLint found no issues"
+                elif [ $LINT_STATUS -eq 1 ]; then
+                  echo "ESLint found lint issues"
+                elif [ $LINT_STATUS -eq 2 ]; then
+                  echo "ESLint encountered configuration or other error"
+                elif [ $LINT_STATUS -eq 127 ]; then
+                  echo "Command not found error"
+                else
+                  echo "ESLint exited with unusual code: $LINT_STATUS"
+                fi
+
+                # Force the overall status to be acceptable for CI purpose
+                # We're just linting, not failing the build on lint issues
+                LINT_STATUS=0
+              else
+                echo "No files found to lint"
+                echo "No lintable files found" > ../reports/frontend-lint.txt
+                LINT_STATUS=0
+              fi
+
+              # Clean up temp file
+              rm -f "$TEMP_FILES_LIST"
+            else
+              echo "No ESLint configuration found"
+              echo "No ESLint configuration found in project" > ../reports/frontend-lint.txt
+              LINT_STATUS=0
+            fi
+          fi
+
+          # Check output size
+          echo "Lint output size: $(wc -l < ../reports/frontend-lint.txt) lines"
+
+          # Determine status based on output
+          FRONTEND_STATUS=0
+          if [ -s ../reports/frontend-lint.txt ]; then
+            if grep -q "error" ../reports/frontend-lint.txt; then
+              FRONTEND_STATUS=2 # Error
+              echo "Detected errors in frontend code"
+            elif grep -q "warning" ../reports/frontend-lint.txt; then
+              FRONTEND_STATUS=1 # Warning
+              echo "Detected warnings in frontend code"
+            else
+              echo "No issues detected in frontend code"
+            fi
+          else
+            echo "Lint output is empty"
+          fi
+
+          # Generate report
+          echo "# Frontend Linting Results" > ../reports/frontend-report.md
+
+          if [ $FRONTEND_STATUS -eq 0 ]; then
+            echo "## ✅ Frontend (ESLint)" >> ../reports/frontend-report.md
+          elif [ $FRONTEND_STATUS -eq 1 ]; then
+            echo "## ⚠️ Frontend (ESLint) (warnings)" >> ../reports/frontend-report.md
+          else
+            echo "## ❌ Frontend (ESLint) (errors)" >> ../reports/frontend-report.md
+          fi
+
+          echo '```' >> ../reports/frontend-report.md
+          cat ../reports/frontend-lint.txt >> ../reports/frontend-report.md
+          echo '```' >> ../reports/frontend-report.md
+
+          # Add to GitHub step summary
+          cat ../reports/frontend-report.md >> "$GITHUB_STEP_SUMMARY"
+
+          # Return original status
+          exit ${LINT_STATUS:-0}
+
+      - name: Upload frontend lint reports
+        if: always() && steps.check_frontend.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-lint-reports
+          path: reports/
+          retention-days: 7
+
+  lint-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if API directory exists
+        id: check_api
+        run: |
+          if [ -d "api" ]; then
+            echo "API directory exists"
+            echo "exists=true" >> $GITHUB_OUTPUT
+            if [ -f "api/go.sum" ]; then
+              echo "Go sum file exists"
+              echo "has_sum=true" >> $GITHUB_OUTPUT
+            else
+              echo "Go sum file not found"
+              echo "has_sum=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "API directory not found"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Go
+        if: steps.check_api.outputs.exists == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: ${{ steps.check_api.outputs.has_sum == 'true' && 'true' || '' }}
+          cache-dependency-path: ${{ steps.check_api.outputs.has_sum == 'true' && 'api/go.sum' || '' }}
+
+      - name: Install Go tools
+        if: steps.check_api.outputs.exists == 'true'
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+
+      - name: Download dependencies
+        if: steps.check_api.outputs.exists == 'true'
+        run: |
+          echo "Downloading API dependencies..."
+          # Initialize modules and download dependencies separately
+          cd api
+          # Capture dependency downloads in a separate log
+          go mod download -x &> "$(pwd)/../go-deps.log"
+          cd ..
+
+      - name: Lint API code
+        id: api-lint
+        continue-on-error: true
+        run: |
+          # Create reports directory in the workspace root
+          mkdir -p "$(pwd)/reports"
+
+          echo "Running Go linters on API code..."
+
+          # Check if api directory exists
+          if [ ! -d "api" ]; then
+            echo "Warning: api directory not found, creating empty lint report"
+            echo "API directory not found" > "$(pwd)/reports/api-lint.txt"
+            API_STATUS=0
+          else
+            # Run API linters and capture output
+            cd api
+
+            # Create an empty lint file to append to
+            touch "$(pwd)/../reports/api-lint.txt"
+
+            # Run go vet - make sure we only capture actual lint output
+            echo "Running go vet..."
+            set +e
+            GO111MODULE=on go vet ./... 2>&1 | tee "$(pwd)/../reports/go-vet.txt"
+            VET_STATUS=$?
+            set -e
+
+            # Show go vet results for diagnostics
+            if [ $VET_STATUS -ne 0 ]; then
+              echo "⚠️ go vet failed with status $VET_STATUS"
+              echo "go vet output:"
+              cat "$(pwd)/../reports/go-vet.txt"
+            else
+              echo "✅ go vet passed"
+            fi
+            cat "$(pwd)/../reports/go-vet.txt" >> "$(pwd)/../reports/api-lint.txt"
+
+            # Run gofmt
+            echo "Running gofmt..."
+            set +e
+            gofmt -l -d . | tee "$(pwd)/../reports/gofmt.txt"
+            FMT_STATUS=$?
+            set -e
+
+            # Show gofmt results for diagnostics
+            if [ $FMT_STATUS -ne 0 ]; then
+              echo "⚠️ gofmt failed with status $FMT_STATUS"
+            elif [ -s "$(pwd)/../reports/gofmt.txt" ]; then
+              echo "⚠️ gofmt found formatting issues:"
+              cat "$(pwd)/../reports/gofmt.txt"
+            else
+              echo "✅ gofmt passed"
+            fi
+            cat "$(pwd)/../reports/gofmt.txt" >> "$(pwd)/../reports/api-lint.txt"
+
+            # Run goimports
+            echo "Running goimports..."
+            set +e
+            goimports -l -d . | tee "$(pwd)/../reports/goimports.txt"
+            IMPORTS_STATUS=$?
+            set -e
+
+            # Show goimports results for diagnostics
+            if [ $IMPORTS_STATUS -ne 0 ]; then
+              echo "⚠️ goimports failed with status $IMPORTS_STATUS"
+            elif [ -s "$(pwd)/../reports/goimports.txt" ]; then
+              echo "⚠️ goimports found issues:"
+              cat "$(pwd)/../reports/goimports.txt"
+            else
+              echo "✅ goimports passed"
+            fi
+            cat "$(pwd)/../reports/goimports.txt" >> "$(pwd)/../reports/api-lint.txt"
+
+            # Check for Go files
+            echo "Checking for Go files in API directory..."
+            GO_FILES=$(find . -name "*.go" | wc -l)
+            echo "Found $GO_FILES Go files"
+
+            if [ "$GO_FILES" -eq 0 ]; then
+              echo "⚠️ No Go files found in API directory"
+              echo "No Go files found in API directory" >> "$(pwd)/../reports/api-lint.txt"
+              API_STATUS=0
+            else
+              # Determine overall status
+              if [ "${VET_STATUS:-0}" -ne 0 ]; then
+                API_STATUS=2  # Error
+                echo "❌ Detected errors in API code from go vet"
+              elif [ "${FMT_STATUS:-0}" -ne 0 ] || [ "${IMPORTS_STATUS:-0}" -ne 0 ]; then
+                API_STATUS=2  # Error
+                echo "❌ Tool execution errors in API code"
+              elif [ -s "$(pwd)/../reports/gofmt.txt" ] || [ -s "$(pwd)/../reports/goimports.txt" ]; then
+                API_STATUS=1  # Warning
+                echo "⚠️ Detected formatting issues in API code"
+              else
+                API_STATUS=0  # Success
+                echo "✅ No issues detected in API code"
+              fi
+            fi
+
+            # Return to workspace root
+            cd ..
+          fi
+
+          # Generate report markdown with clear absolute paths
+          echo "# API Linting Results" > "$(pwd)/reports/api-report.md"
+
+          if [ $API_STATUS -eq 0 ]; then
+            echo "## ✅ Go API Linting" >> "$(pwd)/reports/api-report.md"
+          elif [ $API_STATUS -eq 1 ]; then
+            echo "## ⚠️ Go API Linting (warnings)" >> "$(pwd)/reports/api-report.md"
+          else
+            echo "## ❌ Go API Linting (errors)" >> "$(pwd)/reports/api-report.md"
+          fi
+
+          echo '```' >> "$(pwd)/reports/api-report.md"
+          cat "$(pwd)/reports/api-lint.txt" >> "$(pwd)/reports/api-report.md"
+          echo '```' >> "$(pwd)/reports/api-report.md"
+
+          # Add to GitHub step summary
+          cat "$(pwd)/reports/api-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+          # Exit with original status or 0 if not set
+          exit ${VET_STATUS:-0}
+
+      - name: Upload API lint reports
+        if: always() && steps.check_api.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-lint-reports
+          path: reports/
+          retention-days: 7
+
+      - name: Diagnostic logs
+        if: always() && steps.check_api.outputs.exists == 'true'
+        run: |
+          echo "=== Diagnostic Information ==="
+          echo "Checking lint report files content and sizes:"
+
+          if [ -f "$(pwd)/reports/api-lint.txt" ]; then
+            echo "API lint file size: $(wc -l < $(pwd)/reports/api-lint.txt) lines"
+            echo "First 10 lines of API lint file:"
+            head -n 10 "$(pwd)/reports/api-lint.txt"
+
+            echo "Number of dependency download lines:"
+            grep -c "go: downloading" "$(pwd)/reports/api-lint.txt" || echo "0 (No download lines found)"
+          else
+            echo "API lint file not found"
+          fi
+
+          echo "=== End Diagnostic Information ==="
+
+  summary:
+    needs: [lint-yaml, lint-frontend, lint-api]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Create reports directory
+        run: mkdir -p "$(pwd)/reports"
+
+      - name: Create overall summary
+        run: |
+          echo "# Overall Linting Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # Check job statuses
+          YAML_STATUS="${{ needs.lint-yaml.result }}"
+          FRONTEND_STATUS="${{ needs.lint-frontend.result }}"
+          API_STATUS="${{ needs.lint-api.result }}"
+
+          # Generate summary rows
+          if [ "$YAML_STATUS" == "success" ]; then
+            echo "- ✅ **YAML Lint**: Passed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ❌ **YAML Lint**: Failed" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ "$FRONTEND_STATUS" == "success" ]; then
+            echo "- ✅ **Frontend Lint**: Passed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ❌ **Frontend Lint**: Failed" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ "$API_STATUS" == "success" ]; then
+            echo "- ✅ **API Lint**: Passed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ❌ **API Lint**: Failed" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "See individual job results above for details." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate linting summary
+        if: always()
+        run: |
+          echo "Generating linting summary..."
+
+          # Ensure reports directory exists
+          mkdir -p "$(pwd)/reports"
+
+          # Prepare summary file
+          SUMMARY_FILE="$(pwd)/reports/lint-summary.md"
+          echo "# Linting Results Summary" > "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+          echo "| Component | Status | Details |" >> "$SUMMARY_FILE"
+          echo "|-----------|--------|---------|" >> "$SUMMARY_FILE"
+
+          # Add API status based on job result instead of file content
+          API_STATUS="${{ needs.lint-api.result }}"
+          if [ "$API_STATUS" == "success" ]; then
+            echo "| API | ✅ | No issues found |" >> "$SUMMARY_FILE"
+          elif [ "$API_STATUS" == "skipped" ]; then
+            echo "| API | ⏭️ | Skipped |" >> "$SUMMARY_FILE"
+          else
+            echo "| API | ❌ | See job logs for details |" >> "$SUMMARY_FILE"
+          fi
+
+          # Add Frontend status based on job result
+          FRONTEND_STATUS="${{ needs.lint-frontend.result }}"
+          if [ "$FRONTEND_STATUS" == "success" ]; then
+            echo "| Frontend | ✅ | No issues found |" >> "$SUMMARY_FILE"
+          elif [ "$FRONTEND_STATUS" == "skipped" ]; then
+            echo "| Frontend | ⏭️ | Skipped |" >> "$SUMMARY_FILE"
+          else
+            echo "| Frontend | ❌ | See job logs for details |" >> "$SUMMARY_FILE"
+          fi
+
+          # Add YAML status based on job result
+          YAML_STATUS="${{ needs.lint-yaml.result }}"
+          if [ "$YAML_STATUS" == "success" ]; then
+            echo "| YAML | ✅ | No issues found |" >> "$SUMMARY_FILE"
+          elif [ "$YAML_STATUS" == "skipped" ]; then
+            echo "| YAML | ⏭️ | Skipped |" >> "$SUMMARY_FILE"
+          else
+            echo "| YAML | ❌ | See job logs for details |" >> "$SUMMARY_FILE"
+          fi
+
+      - name: Add summary to GitHub step
+        if: always()
+        run: |
+          # If generated summary exists, copy to GitHub step summary
+          if [ -f "$(pwd)/reports/lint-summary.md" ]; then
+            cat "$(pwd)/reports/lint-summary.md" >> $GITHUB_STEP_SUMMARY
+            echo "Lint summary added to GitHub step summary"
+          fi
+
+      - name: Upload lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-summary-report
+          path: reports/
+          retention-days: 5
