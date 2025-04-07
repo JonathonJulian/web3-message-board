@@ -161,7 +161,7 @@ jobs:
           if [ -n "$VERSION_TAG" ]; then
             VERSION_NUMBER="${VERSION_TAG#v}"
             echo "📌 Using version tag: \"$VERSION_TAG\" (\"$VERSION_NUMBER\")"
-            EXTRA_VARS="api_release_version=\"$VERSION_NUMBER\" frontend_release_version=\"$VERSION_NUMBER\""
+            EXTRA_VARS="api_release_version=\"$VERSION_NUMBER\" frontend_release_version=\"$VERSION_NUMBER\" service_release_version=\"$VERSION_TAG\""
           fi
 
           # Additional component-specific version handling for repository_dispatch
@@ -222,6 +222,12 @@ jobs:
 
           # Run the deployment using the Makefile target
           set -x  # Print commands as they execute
+
+          # Debug output for troubleshooting
+          echo "🔍 Debug: ALL_EXTRA_VARS = $ALL_EXTRA_VARS"
+          echo "🔍 Debug: VERSION_TAG = $VERSION_TAG"
+          echo "🔍 Debug: VERSION_NUMBER = $VERSION_NUMBER"
+
           make "$MAKE_TARGET" ANSIBLE_EXTRA_VARS="$ALL_EXTRA_VARS"
           MAKE_EXIT_CODE=$?
           set +x  # Disable command printing

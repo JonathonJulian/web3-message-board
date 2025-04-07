@@ -18,11 +18,6 @@
   ignore_errors: true
   tags: ['hosts', 'kubernetes']
 
-- name: Debug kubectl context
-  ansible.builtin.debug:
-    var: kubectl_context
-  tags: ['hosts', 'kubernetes']
-
 - name: Get ingress controller address
   kubernetes.core.k8s_info:
     api_version: networking.k8s.io/v1
@@ -34,11 +29,6 @@
   become: false
   tags: ['hosts', 'kubernetes']
   ignore_errors: true
-
-- name: Debug ingress lookup status
-  ansible.builtin.debug:
-    msg: "Ingress lookup status: {{ 'successful' if minio_ingress is not failed else 'failed - ' + (minio_ingress.msg | default('unknown error')) }}"
-  tags: ['hosts', 'kubernetes']
 
 - name: Set default ingress IP if lookup failed
   ansible.builtin.set_fact:
