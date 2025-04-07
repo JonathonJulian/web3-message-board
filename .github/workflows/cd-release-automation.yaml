@@ -530,7 +530,6 @@ jobs:
             ./artifacts/api/*
             ./artifacts/frontend/*
             ./artifacts/docker/*
-            ./artifacts/docker-builds/**/*
           body: |
             ## Release Information
             - **Version:** ${{ needs.bump-version.outputs.new_tag }}
