@@ -371,16 +371,6 @@ make lint-js    # JavaScript/TypeScript
 make lint-go    # Go code
 ```
 
-### Pre-commit Hooks
-
-To enable pre-commit hooks for automatic linting:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-The pre-commit hook will run appropriate linters based on the files you're committing.
-
 ## Linting Tools
 
 This repository contains several tools to automatically fix linting issues:
