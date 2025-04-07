@@ -54,10 +54,7 @@ logs:
     job: api
     type: application
 
-  - name: frontend
-    path: /var/log/nginx/frontend-access.log
-    job: frontend
-    type: access
+  # Frontend requests are captured in the main Nginx access.log
 
 # Kubernetes Ingress Host Entries
 k8s_ingress:
