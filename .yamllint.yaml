@@ -1,0 +1,95 @@
+---
+# Base YAML Linter Configuration
+extends: default
+
+rules:
+  # Core rules for all YAML files
+  line-length:
+    max: 200
+    level: warning
+  document-start:
+    level: warning
+  comments:
+    min-spaces-from-content: 1
+  trailing-spaces:
+    level: error
+  new-line-at-end-of-file:
+    level: error
+  indentation:
+    spaces: 2
+    indent-sequences: true
+    check-multi-line-strings: false
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off', 'yes', 'no']
+    check-keys: false
+
+# Platform-specific overrides
+# The first matching regex pattern will be used
+yaml-files:
+  - '*.yaml'
+  - '*.yml'
+  - '.yamllint'
+
+ignore: |
+  node_modules/
+  .git/
+  .github/**/CODEOWNERS
+  **/.DS_Store
+
+# Files with specific exceptions
+overrides:
+  # GitHub Actions workflows
+  - regex: '^\.github/workflows/.*\.ya?ml$'
+    rules:
+      brackets:
+        min-spaces-inside: 0
+        max-spaces-inside: 0
+      braces:
+        max-spaces-inside: 1  # Allow for extra spacing with expressions
+        min-spaces-inside: 0
+      truthy: disable  # Allow 'on' as a key in workflows
+
+  # Ansible playbooks and roles
+  - regex: '^ansible/.*\.ya?ml$'
+    rules:
+      braces:
+        min-spaces-inside: 0
+        max-spaces-inside: 1  # Allow for Jinja2 templating spacing
+      brackets:
+        min-spaces-inside: 0
+        max-spaces-inside: 1
+      truthy: disable  # Allow Ansible 'yes/no' boolean values
+
+  # Helm charts and templates
+  - regex: '^monitoring/.*\.ya?ml$'
+    rules:
+      indentation:
+        indent-sequences: consistent
+      braces:
+        min-spaces-inside: 0
+        max-spaces-inside: 1
+      brackets:
+        min-spaces-inside: 0
+        max-spaces-inside: 1
+      line-length:
+        max: 300  # Templates can get long with Go template expressions
+        level: warning
+
+  # Special rule for Helm template files with Go template directives
+  - regex: '^monitoring/templates/.*\.ya?ml$'
+    rules:
+      syntax:
+        ignore: |
+          # Ignore syntax errors for Go template directives
+          ^{{.*}}$
+          ^{{-.*}}$
+          ^{{.*-}}$
+      indentation:
+        # Be more lenient with indentation in template files
+        check-multi-line-strings: false
+        indent-sequences: consistent
+
+  # Docker Compose
+  - regex: '^docker-compose\.ya?ml$'
+    rules:
+      truthy: disable  # Docker often uses 'yes/no' for booleans
