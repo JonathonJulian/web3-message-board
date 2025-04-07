@@ -24,7 +24,7 @@ help:
 	@echo "  helm-setup       - Create namespace and prepare for Helm deployments"
 	@echo "  helm-deploy      - Deploy all Helm charts"
 	@echo "  helm-delete      - Delete all Helm deployments"
-	@echo "  monitoring-deploy - Deploy monitoring stack (Grafana, Loki, MinIO)"
+	@echo "  charts-deploy - Deploy monitoring stack (Grafana, Loki, MinIO)"
 	@echo "  monitoring-delete - Delete monitoring stack"
 	@echo "  grafana-deploy   - Deploy only Grafana component"
 	@echo "  grafana-delete   - Delete only Grafana component"
@@ -80,11 +80,11 @@ helm-setup:
 	helm repo update
 
 .PHONY: helm-deploy
-helm-deploy: helm-setup monitoring-deploy
+helm-deploy: helm-setup charts-deploy
 	@echo "Helm deployment completed!"
 
-.PHONY: monitoring-deploy
-monitoring-deploy: helm-setup
+.PHONY: charts-deploy
+charts-deploy: helm-setup
 	@echo "Deploying monitoring stack (Grafana, Loki, MinIO)..."
 	@echo "Setting up Kubernetes namespace..."
 	kubectl create namespace $(HELM_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
@@ -93,7 +93,7 @@ monitoring-deploy: helm-setup
 	cd monitoring && helm dependency update .
 
 	@echo "Deploying monitoring stack..."
-	cd monitoring && helm upgrade --install monitoring . \
+	cd charts && bash deploy.sh \
 	  --namespace $(HELM_NAMESPACE) \
 	  --timeout 10m
 
@@ -107,7 +107,7 @@ monitoring-deploy: helm-setup
 .PHONY: grafana-deploy
 grafana-deploy: helm-setup
 	@echo "Deploying Grafana only..."
-	cd monitoring && helm upgrade --install monitoring . \
+	cd charts && bash deploy.sh \
 		--namespace $(HELM_NAMESPACE) \
 		--timeout 5m \
 		--set loki.enabled=false \
@@ -117,7 +117,7 @@ grafana-deploy: helm-setup
 .PHONY: loki-deploy
 loki-deploy: helm-setup
 	@echo "Deploying Loki only..."
-	cd monitoring && helm upgrade --install monitoring . \
+	cd charts && bash deploy.sh \
 		--namespace $(HELM_NAMESPACE) \
 		--timeout 5m \
 		--set grafana.enabled=false \
@@ -127,7 +127,7 @@ loki-deploy: helm-setup
 .PHONY: minio-deploy
 minio-deploy: helm-setup
 	@echo "Deploying MinIO only..."
-	cd monitoring && helm upgrade --install monitoring . \
+	cd charts && bash deploy.sh \
 		--namespace $(HELM_NAMESPACE) \
 		--timeout 5m \
 		--set grafana.enabled=false \
@@ -305,6 +305,54 @@ teardown: helm-delete vm-delete
 # Utility Functions
 .PHONY: logs
 logs:
+	@echo "Fetching recent API logs from Loki..."
+	@curl -s -G "http://grafana.local/loki/loki/api/v1/query" \
+		--data-urlencode 'query={job="api"}' \
+		--data-urlencode 'limit=100' | \
+		jq -r '.data.result[0].values[]? | .[1] // empty' 2>/dev/null || \
+		echo "No logs found or error querying Loki API"
+
+.PHONY: logs-debug
+logs-debug:
+	@echo "Debugging Loki API response (raw output)..."
+	@curl -v -G "http://grafana.local/loki/loki/api/v1/query" \
+		--data-urlencode 'query={job="api"}' \
+		--data-urlencode 'limit=100'
+
+.PHONY: loki-labels
+loki-labels:
+	@echo "Checking available labels in Loki..."
+	@curl -s -G "http://grafana.local/loki/loki/api/v1/labels" | jq
+
+.PHONY: loki-label-values
+loki-label-values:
+	@echo "Checking values for job label in Loki..."
+	@curl -s -G "http://grafana.local/loki/loki/api/v1/label/job/values" | jq
+
+.PHONY: loki-series
+loki-series:
+	@echo "Checking available series in Loki..."
+	@curl -s -G "http://grafana.local/loki/loki/api/v1/series" \
+		--data-urlencode 'match={}' | jq
+
+.PHONY: logs-follow
+logs-follow:
+	@echo "Following API logs with Loki API (will exit after 100 logs, press Ctrl+C to exit sooner)..."
+	@echo "Starting from $(shell date -u -d '1 minute ago' '+%Y-%m-%dT%H:%M:%SZ')"
+	@current_time=$$(date -u +%s); \
+	end_time=$$(( current_time + 300 )); \
+	while [ $${current_time} -lt $${end_time} ]; do \
+		curl -s -G "http://grafana.local/loki/loki/api/v1/query" \
+			--data-urlencode "query={job=\"api\"}" \
+			--data-urlencode "start=$(shell date -u -d '1 minute ago' '+%Y-%m-%dT%H:%M:%SZ')" \
+			--data-urlencode "limit=10" | \
+			jq -r '.data.result[0].values[]? | .[1] // empty' 2>/dev/null; \
+		sleep 3; \
+		current_time=$$(date -u +%s); \
+	done
+
+.PHONY: monitoring-service-logs
+monitoring-service-logs:
 	@echo "Viewing logs from Loki and Grafana..."
 	kubectl logs -n $(HELM_NAMESPACE) -l app=loki --tail=20
 	kubectl logs -n $(HELM_NAMESPACE) -l app.kubernetes.io/name=grafana --tail=20
@@ -448,3 +496,19 @@ github-runner-setup:
 
 # Default target
 .DEFAULT_GOAL := help
+
+# Let's add a new target that tries to diagnose ingress paths
+.PHONY: loki-path-test
+loki-path-test:
+	@echo "Testing different possible Loki API path configurations..."
+	@echo "\n1. Trying http://grafana.local/loki-push (POST):"
+	@curl -s -X POST "http://grafana.local/loki-push" -H "Content-Type: application/json" -d '{}' | grep -q "No Content" && echo "✅ Succeeded" || echo "❌ Failed"
+
+	@echo "\n2. Trying http://grafana.local/loki/api/v1/query:"
+	@curl -s -G "http://grafana.local/loki/api/v1/query" --data-urlencode 'query={}' | grep -q "result" && echo "✅ Succeeded" || echo "❌ Failed"
+
+	@echo "\n3. Trying http://grafana.local/loki/loki/api/v1/query:"
+	@curl -s -G "http://grafana.local/loki/loki/api/v1/query" --data-urlencode 'query={}' | grep -q "result" && echo "✅ Succeeded" || echo "❌ Failed"
+
+	@echo "\n4. Trying http://loki.local/api/v1/query:"
+	@curl -s -G "http://loki.local/api/v1/query" --data-urlencode 'query={}' | grep -q "result" && echo "✅ Succeeded" || echo "❌ Failed"

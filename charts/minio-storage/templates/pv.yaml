@@ -1,0 +1,31 @@
+{{- /* Skip this template if templates.pv is false */}}
+{{- if or (not (hasKey .Values "templates")) (not (hasKey .Values.templates "pv")) (eq .Values.templates.pv true)}}
+
+---
+# Minio PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-minio-pv
+  labels:
+    app: {{.Release.Name}}-minio
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: {{.Values.minio.persistence.size}}
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/minio
+    type: DirectoryOrCreate
+  volumeMode: Filesystem
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - worker0  # Using worker node for storage
+{{- end}}

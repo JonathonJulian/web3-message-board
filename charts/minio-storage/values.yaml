@@ -1,0 +1,84 @@
+---
+# MinIO configuration
+minio:
+  # Access credentials
+  rootUser: "minioadmin"
+  rootPassword: "minioadmin"
+
+  # Enable the MinIO console
+  console:
+    enabled: true
+
+  # Only need one replica for development
+  mode: standalone
+  replicas: 1
+
+  # Resources limits
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+
+  # Create default buckets
+  defaultBuckets: "loki-chunks,terraform-state"
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 9000
+
+  # Persistence configuration (for storing data)
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: local-storage
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/use-regex: "true"
+      nginx.ingress.kubernetes.io/rewrite-target: /$1
+      nginx.ingress.kubernetes.io/proxy-body-size: "500m"
+      nginx.ingress.kubernetes.io/proxy-connect-timeout: "300"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    path: /minio/?(.*)
+    hosts:
+      - minio.local
+    api:
+      annotations:
+        nginx.ingress.kubernetes.io/proxy-body-size: "500m"
+      path: /minio-api/?(.*)
+
+  # Console ingress
+  consoleIngress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/use-regex: "true"
+      nginx.ingress.kubernetes.io/rewrite-target: /$1
+      nginx.ingress.kubernetes.io/proxy-body-size: "500m"
+    path: /minio-console/?(.*)
+    hosts:
+      - minio.local
+
+# Init job configuration for PV setup
+initJob:
+  enabled: true
+  image: "busybox:latest"
+  imagePullPolicy: "IfNotPresent"
+
+  # Commands to run for initializing volumes
+  args:
+    - |
+      # Create Minio directory with appropriate permissions
+      mkdir -p /storage/minio
+      chmod -R 777 /storage/minio
+      echo "MinIO volume initialization completed successfully!"
+
+templates:
+  pv: true  # Enable PVs for local-storage (required)

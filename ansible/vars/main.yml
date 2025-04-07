@@ -1,80 +1,25 @@
 ---
-# Global variables
+# =============================================================================
+# Web3 Message Board - Global Configuration Variables
+# =============================================================================
 
+# -----------------------------------------------------------------------------
+# Application Metadata
+# -----------------------------------------------------------------------------
+deployment_id: "web3-message-board"
+deployment_environment: "production"  # Options: development, staging, production
+
+# -----------------------------------------------------------------------------
+# Authentication & Security
+# -----------------------------------------------------------------------------
 # GitHub Authentication
-github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"  # Token is fetched exclusively from the environment.
-
-# Nginx settings
-nginx_port: 80
-nginx_server_name: "_"
-nginx_log_path: /var/log/nginx
-nginx_access_log: "{{ nginx_log_path }}/access.log"
-nginx_error_log: "{{ nginx_log_path }}/error.log"
-nginx_backend_port: 8080
-nginx_root_dir: "{{ static_site_install_dir }}"
-nginx_index_files: "index.html index.htm"
-nginx_proxy_locations:
-  - location: /api/
-    backend_url: http://localhost:{{ nginx_backend_port }}/api/
-    websocket: false
-
-# Application paths
-static_site_install_dir: /var/www/html
-
-# Firewall settings
-firewall_rules:
-  - port: 22
-    proto: tcp
-    comment: "SSH"
-  - port: 80
-    proto: tcp
-    comment: "HTTP"
-
-# Logging settings
-logging_agent: alloy
-loki_url: "http://grafana.local/loki-push"
-logs:
-  - name: nginx-access
-    path: /var/log/nginx/access.log
-    job: nginx
-    type: access
-
-  - name: nginx-error
-    path: /var/log/nginx/error.log
-    job: nginx
-    type: error
-
-  - name: system
-    path: /var/log/syslog
-    job: system
-    type: syslog
-
-  - name: api
-    path: /var/log/api.log
-    job: api
-    type: application
-
-  # Frontend requests are captured in the main Nginx access.log
-
-# Kubernetes Ingress Host Entries
-k8s_ingress:
-  default_ip: "192.168.1.77"
-  namespace: "web3"
-  resource_name: "monitoring-minio"
-  host_entries:
-    - hostname: "grafana.local"
-      description: "Grafana dashboard"
-    - hostname: "minio.local"
-      description: "MinIO object storage"
-    - hostname: "loki.local"
-      description: "Loki log aggregation"
+github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"  # Token is fetched from environment
 
 # Authentication settings
 auth:
-  # Default authentication method: 'ssh_key' or 'password'
-  method: "ssh_key"
+  method: "ssh_key"  # Options: 'ssh_key' or 'password'
 
-# User settings
+# User accounts and permissions
 users:
   - name: devops
     groups: sudo
@@ -98,6 +43,38 @@ users:
       key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBJUcYxTi0JpfMJlK9ooXl7nmrMUcxOh6RQsgxgNMIeB bob@message-board"
       state: present
 
+# Firewall configuration
+firewall_rules:
+  - port: 22
+    proto: tcp
+    comment: "SSH"
+  - port: 80
+    proto: tcp
+    comment: "HTTP"
+
+# -----------------------------------------------------------------------------
+# Web Server Configuration
+# -----------------------------------------------------------------------------
+# Nginx settings
+nginx_port: 80
+nginx_server_name: "_"
+nginx_log_path: /var/log/nginx
+nginx_access_log: "{{ nginx_log_path }}/access.log"
+nginx_error_log: "{{ nginx_log_path }}/error.log"
+nginx_backend_port: 8080
+nginx_root_dir: "{{ static_site_install_dir }}"
+nginx_index_files: "index.html index.htm"
+nginx_proxy_locations:
+  - location: /api/
+    backend_url: http://localhost:{{ nginx_backend_port }}/api/
+    websocket: false
+
+# Application paths
+static_site_install_dir: /var/www/html
+
+# -----------------------------------------------------------------------------
+# API Service Configuration
+# -----------------------------------------------------------------------------
 # Go service configuration for API
 service_name: "api"
 service_description: "Web3 Message Board API Service"
@@ -108,8 +85,67 @@ service_env_vars:
   WEB3_CONTRACT_ADDRESS: "0xEFD38108dfE2c80f29579E6D692c4009586A3f59"
   WEB3_RPC_URL: "https://testnet-rpc.monad.xyz"
 
+# -----------------------------------------------------------------------------
+# Frontend Configuration
+# -----------------------------------------------------------------------------
 # Static site configuration
 static_site_name: "frontend"
 static_site_github_repo: "JonathonJulian/web3-message-board"
 static_site_release_version: "v0.1.5-beta.1"
 static_site_archive_pattern: "frontend-bundle.tar.gz"
+
+# -----------------------------------------------------------------------------
+# Monitoring & Logging Configuration
+# -----------------------------------------------------------------------------
+# Logging agent and destination
+logging_agent: alloy  # Options: alloy, promtail
+loki_url: "http://loki.local/loki/api/v1/push"
+
+# Log sources to collect and send to Loki
+logs:
+  - name: nginx-access
+    path: /var/log/nginx/access.log
+    job: nginx
+    type: access
+
+  - name: nginx-error
+    path: /var/log/nginx/error.log
+    job: nginx
+    type: error
+
+  - name: system
+    path: /var/log/syslog
+    job: system
+    type: syslog
+
+  - name: api
+    path: /var/log/api.log
+    job: api
+    type: application
+
+# -----------------------------------------------------------------------------
+# Kubernetes Integration
+# -----------------------------------------------------------------------------
+# Kubernetes Ingress Host Entries
+k8s_ingress:
+  namespace: "web3"
+  default_ip: "192.168.1.77"
+  resources:
+    # Monitoring stack components
+    - name: "loki-stack"
+      hosts:
+        - hostname: "loki.local"
+          description: "Loki log aggregation"
+    - name: "loki-stack-grafana"
+      hosts:
+        - hostname: "grafana.local"
+          description: "Grafana dashboard"
+    - name: "loki-stack-prometheus-server"
+      hosts:
+        - hostname: "prometheus.local"
+          description: "Prometheus metrics"
+    # Storage components
+    - name: "minio-storage"
+      hosts:
+        - hostname: "minio.local"
+          description: "MinIO object storage"
