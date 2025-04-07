@@ -15,8 +15,6 @@ Web3 Message Board is a full-stack dApp that combines:
 
 Users can post messages to the blockchain, view the message history, and create profiles - all without a centralized database. Messages are permanently stored on-chain, ensuring transparency and immutability.
 
-**Note:** The architecture description is available in [docs/architecture.txt](docs/architecture.txt).
-
 ## Features
 
 - **On-chain Messaging**: Post and retrieve messages stored directly on the blockchain
