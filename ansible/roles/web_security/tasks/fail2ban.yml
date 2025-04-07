@@ -69,21 +69,6 @@
   when: not ansible_check_mode
   tags: ['security', 'fail2ban']
 
-# Always check the logs, even if service shows failed
-- name: Check detailed fail2ban logs
-  ansible.builtin.shell: journalctl -u fail2ban -n 10
-  register: fail2ban_logs_detail
-  changed_when: false
-  ignore_errors: true
-  when: not ansible_check_mode
-  tags: ['security', 'fail2ban']
-
-- name: Display detailed fail2ban logs
-  ansible.builtin.debug:
-    var: fail2ban_logs_detail.stdout_lines | default(['No log data available'])
-  when: not ansible_check_mode
-  tags: ['security', 'fail2ban']
-
 # Verify fail2ban service status
 - name: Report fail2ban service state
   ansible.builtin.debug:
