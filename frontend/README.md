@@ -15,7 +15,7 @@ The frontend provides a responsive, user-friendly interface for interacting with
 - [Svelte](https://svelte.dev/) - UI framework
 - [TypeScript](https://www.typescriptlang.org/) - Type-safe JavaScript
 - [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS framework
-- [ethers.js](https://docs.ethers.io/) - Ethereum library for blockchain interaction
+- [ethers.js](https://docs.ethers.io/) - Blockchain library for Nomad interaction
 - [Web3Modal](https://github.com/Web3Modal/web3modal) - Wallet connection library
 
 ## Directory Structure
@@ -100,13 +100,13 @@ This will:
 - Dark/light theme support
 - Accessibility features
 
-## Integration with Blockchain
+## Integration with Nomad Blockchain
 
-The frontend communicates directly with the deployed MessageBoard smart contract, as well as with the Go API service that provides additional functionality:
+The frontend communicates directly with the deployed MessageBoard smart contract on the Nomad blockchain, as well as with the Go API service that provides additional functionality:
 
 - Direct contract interactions for core message board features
 - API integration for additional metadata and indexing
-- WebSocket connection for real-time blockchain event updates
+- WebSocket connection for real-time Nomad blockchain event updates
 
 ## Logging and Monitoring
 

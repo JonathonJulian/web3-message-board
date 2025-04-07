@@ -129,7 +129,7 @@
       console.log("API endpoint is reachable:", apiResponse.status);
 
       // Check blockchain RPC endpoint
-      console.log("Checking Arbitrum Sepolia RPC endpoint...");
+      console.log("Checking Nomad RPC endpoint...");
       const rpcResponse = await fetch('https://arbitrum-sepolia.infura.io/v3/95267af4ac9947e488119d2052311552', {
         method: 'POST',
         headers: {
@@ -200,7 +200,7 @@
 
     <!-- Network badge -->
     <div class="bg-yellow-900/30 border border-yellow-700/50 text-yellow-400 px-4 py-2 rounded-lg text-sm text-center mb-6">
-      Running on Arbitrum Sepolia (Chain ID: 421614)
+      Running on Nomad (Chain ID: 421614)
     </div>
 
     <!-- Wallet section -->
@@ -406,7 +406,7 @@
           <p class="text-gray-400 mb-2">Connect your wallet to view and post messages</p>
           <div class="bg-yellow-900/30 border border-yellow-700/50 text-yellow-400 px-4 py-3 rounded-lg text-sm inline-block">
             <p class="font-medium">Network Requirements</p>
-            <p class="mt-1">This app requires Arbitrum Sepolia (Chain ID: 421614)</p>
+            <p class="mt-1">This app requires Nomad (Chain ID: 421614)</p>
           </div>
         </div>
       </div>
@@ -420,7 +420,7 @@
         <span class="text-monad-purple-light font-medium mx-1">Monad</span>
         <span class="text-gray-600 mx-1">•</span>
         <span>Contract deployed on</span>
-        <span class="text-yellow-400 font-medium ml-1">Arbitrum Sepolia</span>
+        <span class="text-yellow-400 font-medium ml-1">Nomad</span>
       </div>
       <div class="text-xs text-gray-600 font-mono">{CONTRACT_ADDRESS}</div>
     </div>
