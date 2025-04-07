@@ -1,14 +1,6 @@
 ---
 # tasks file for hosts role
 
-- name: Set default values if k8s_ingress not defined in main vars
-  ansible.builtin.set_fact:
-    default_ingress_ip: "{{ k8s_ingress.default_ip | default(default_ingress_ip) }}"
-    k8s_namespace: "{{ k8s_ingress.namespace | default(k8s_namespace) }}"
-    ingress_resource_name: "{{ k8s_ingress.resource_name | default(ingress_resource_name) }}"
-    host_entries: "{{ k8s_ingress.host_entries | default(host_entries) }}"
-  tags: ['hosts']
-
 - name: Get current kubectl context
   ansible.builtin.command: kubectl config current-context
   register: kubectl_context
@@ -18,47 +10,66 @@
   ignore_errors: true
   tags: ['hosts', 'kubernetes']
 
-- name: Get ingress controller address
+- name: Initialize an empty hostnames dictionary
+  ansible.builtin.set_fact:
+    host_ips: {}
+  tags: ['hosts']
+
+# Simple approach: one task to extract all hosts from ingress resources
+- name: Get and process ingress resources
+  block:
+    - name: Process each hostname from all ingress resources
+      ansible.builtin.set_fact:
+        host_ips: "{{ host_ips | combine({item.1.hostname: ingress_ip}) }}"
+      vars:
+        ingress_info: "{{ ingress_resources.results | selectattr('item.name', 'equalto', item.0.name) | first }}"
+        ingress_ip: >-
+          {% if ingress_info.resources is defined and ingress_info.resources | length > 0 and
+             ingress_info.resources[0].status is defined and
+             ingress_info.resources[0].status.loadBalancer is defined and
+             ingress_info.resources[0].status.loadBalancer.ingress is defined and
+             ingress_info.resources[0].status.loadBalancer.ingress | length > 0 and
+             ingress_info.resources[0].status.loadBalancer.ingress[0].ip is defined %}
+          {{ ingress_info.resources[0].status.loadBalancer.ingress[0].ip }}
+          {% else %}
+          {{ k8s_ingress.default_ip }}
+          {% endif %}
+      with_subelements:
+        - "{{ k8s_ingress.resources }}"
+        - hosts
+      tags: ['hosts']
+  when: k8s_ingress is defined and k8s_ingress.resources is defined
+  tags: ['hosts']
+
+- name: Get information for each ingress resource
   kubernetes.core.k8s_info:
     api_version: networking.k8s.io/v1
     kind: Ingress
-    name: "{{ ingress_resource_name }}"
-    namespace: "{{ k8s_namespace }}"
-  register: minio_ingress
+    name: "{{ item.name }}"
+    namespace: "{{ k8s_ingress.namespace }}"
+  register: ingress_resources
   delegate_to: localhost
   become: false
-  tags: ['hosts', 'kubernetes']
   ignore_errors: true
+  loop: "{{ k8s_ingress.resources | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  tags: ['hosts', 'kubernetes']
 
-- name: Set default ingress IP if lookup failed
-  ansible.builtin.set_fact:
-    ingress_ip: "{{ default_ingress_ip }}"
-  when: minio_ingress is failed or minio_ingress.resources | length == 0 or minio_ingress.resources[0].status is not defined
-  tags: ['hosts']
-
-- name: Extract ingress IP from successful lookup
-  ansible.builtin.set_fact:
-    ingress_ip: "{{ minio_ingress.resources[0].status.loadBalancer.ingress[0].ip | default(default_ingress_ip) }}"
-  when: minio_ingress is not failed and minio_ingress.resources | length > 0 and minio_ingress.resources[0].status is defined
-  tags: ['hosts']
-
-- name: Get list of hostnames from host_entries
-  ansible.builtin.set_fact:
-    hostnames_list: "{{ host_entries | map(attribute='hostname') | list }}"
-  tags: ['hosts']
-
-- name: Remove existing ingress entries to avoid duplicates
+- name: Remove existing entries from /etc/hosts
   ansible.builtin.lineinfile:
     path: /etc/hosts
-    regexp: "^{{ default_ingress_ip }}"
+    regexp: "{{ item.key }}"
     state: absent
+  with_dict: "{{ host_ips }}"
   tags: ['hosts']
 
-- name: Add hosts entries for Kubernetes ingresses
+- name: Add entries to /etc/hosts
   ansible.builtin.lineinfile:
     path: /etc/hosts
-    line: "{{ ingress_ip }} {{ hostnames_list | join(' ') }}"
+    line: "{{ item.value }} {{ item.key }}"
     state: present
+  with_dict: "{{ host_ips }}"
   tags: ['hosts']
 
 - name: Display hosts file for verification
@@ -74,5 +85,5 @@
 
 - name: Display configured hosts entries
   ansible.builtin.debug:
-    msg: "Added the following hostnames pointing to {{ ingress_ip }}: {{ hostnames_list | join(', ') }}"
+    msg: "Added hosts entries: {{ host_ips | to_nice_yaml }}"
   tags: ['hosts']

@@ -37,9 +37,10 @@ spec:
           {{- else }}
           args:
             - |
-              echo "No initialization commands specified in values.yaml"
-              mkdir -p /storage
-              chmod -R 777 /storage
+              # Create Minio directory with appropriate permissions
+              mkdir -p /storage/minio
+              chmod -R 777 /storage/minio
+              echo "MinIO volume initialization completed successfully!"
           {{- end }}
           volumeMounts:
             - name: storage

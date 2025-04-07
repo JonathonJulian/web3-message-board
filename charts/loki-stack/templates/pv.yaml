@@ -1,0 +1,126 @@
+{{- /* Skip this template if templates.pv is false */}}
+{{- if or (not (hasKey .Values "templates")) (not (hasKey .Values.templates "pv")) (eq .Values.templates.pv true)}}
+
+---
+# Loki PV for Storage
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-loki-pv-50gb
+  labels:
+    app: {{.Release.Name}}-loki
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/loki
+    type: DirectoryOrCreate
+  volumeMode: Filesystem
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - worker0  # Using worker node for storage
+
+{{- if and (index .Values "loki-stack" "grafana" "enabled") (index .Values "loki-stack" "grafana" "persistence" "enabled") }}
+---
+# Grafana PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-grafana-pv
+  labels:
+    app: {{.Release.Name}}-grafana
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: {{ default "10Gi" (index .Values "loki-stack" "grafana" "persistence" "size") }}
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/grafana
+    type: DirectoryOrCreate
+  volumeMode: Filesystem
+  claimRef:
+    namespace: {{.Release.Namespace}}
+    name: {{.Release.Name}}-grafana
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - worker0  # Using worker node for storage
+{{- end}}
+
+---
+# Prometheus Server PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-prometheus-server-pv
+  labels:
+    app: {{.Release.Name}}-prometheus-server
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/prometheus
+    type: DirectoryOrCreate
+  volumeMode: Filesystem
+  claimRef:
+    namespace: {{.Release.Namespace}}
+    name: {{.Release.Name}}-prometheus-server
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - worker0  # Using worker node for storage
+
+---
+# Prometheus AlertManager PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.Release.Name}}-prometheus-alertmanager-pv
+  labels:
+    app: {{.Release.Name}}-prometheus-alertmanager
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/alertmanager
+    type: DirectoryOrCreate
+  volumeMode: Filesystem
+  claimRef:
+    namespace: {{.Release.Namespace}}
+    name: storage-{{.Release.Name}}-alertmanager-0
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - worker0  # Using worker node for storage
+{{- end}}

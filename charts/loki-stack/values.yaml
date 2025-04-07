@@ -1,69 +1,4 @@
 ---
-# Configure Loki Stack
-lokiStack:
-  enabled: true  # Enable the loki-stack chart
-
-# Configure Prometheus (enabled)
-prometheus:
-  enabled: true  # Enable Prometheus
-
-  # Server configuration
-  server:
-    persistentVolume:
-      enabled: true
-      size: 50Gi
-      storageClass: local-storage
-
-    # Add nodeSelector to target worker0
-    nodeSelector:
-      kubernetes.io/hostname: worker0
-
-    # Fix permission issues
-    securityContext:
-      runAsUser: 65534
-      runAsNonRoot: true
-      runAsGroup: 65534
-      fsGroup: 65534
-
-  # Add service monitor for monitoring Kubernetes components
-  kubeStateMetrics:
-    enabled: true
-
-  # Add node exporter to collect host metrics
-  nodeExporter:
-    enabled: true
-
-  # Configure alertmanager
-  alertmanager:
-    enabled: true
-    persistentVolume:
-      enabled: true
-      size: 10Gi
-      storageClass: local-storage
-
-    # Add nodeSelector to target worker0
-    nodeSelector:
-      kubernetes.io/hostname: worker0
-
-    # Fix permission issues
-    securityContext:
-      runAsUser: 65534
-      runAsNonRoot: true
-      runAsGroup: 65534
-      fsGroup: 65534
-
-  # Ingress for Prometheus UI
-  ingress:
-    enabled: true
-    ingressClassName: nginx
-    annotations:
-      nginx.ingress.kubernetes.io/rewrite-target: /$1
-      nginx.ingress.kubernetes.io/use-regex: "true"
-    hosts:
-      - grafana.local
-    path: /prometheus/?(.*)
-    pathType: Prefix
-
 # Configure loki-stack chart with correct structure
 loki-stack:
   # Configure loki within the stack
@@ -75,22 +10,16 @@ loki-stack:
     # Add tolerations to ensure it doesn't run on control plane
     tolerations: []
 
-    # Configure Loki's built-in ingress
     ingress:
       enabled: true
       ingressClassName: nginx
       annotations:
-        nginx.ingress.kubernetes.io/rewrite-target: /loki/api/v1/push
-        nginx.ingress.kubernetes.io/use-regex: "true"
-        nginx.ingress.kubernetes.io/proxy-body-size: "500m"
-        nginx.ingress.kubernetes.io/proxy-connect-timeout: "300"
-        nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-        nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+        kubernetes.io/ingress.class: nginx
       hosts:
-        - host: grafana.local
+        - host: loki.local
           paths:
-            - /loki-push
-
+            - /
+      pathType: Prefix
     # Optimize Loki for faster indexing and use MinIO for storage
     config:
       schema_config:
@@ -109,10 +38,10 @@ loki-stack:
           cache_location: /data/loki/boltdb-shipper-cache
           cache_ttl: 24h # Increase cache TTL to improve query performance
         aws:
-          s3: s3://minioadmin:minioadmin@monitoring-minio.web3.svc.cluster.local:9000/loki-chunks
+          s3: s3://minioadmin:minioadmin@minio-storage.web3.svc.cluster.local:9000/loki-chunks
           s3forcepathstyle: true
           bucketnames: loki-chunks
-          endpoint: monitoring-minio.web3.svc.cluster.local:9000
+          endpoint: minio-storage.web3.svc.cluster.local:9000
           access_key_id: minioadmin
           secret_access_key: minioadmin
           insecure: true
@@ -173,7 +102,7 @@ loki-stack:
     enabled: true
     config:
       clients:
-        - url: http://{{ .Release.Name }}-loki:3100/loki/api/v1/push
+        - url: http://{{ .Release.Name }}:3100/loki/api/v1/push
 
   # Configure Grafana within the stack
   grafana:
@@ -194,20 +123,19 @@ loki-stack:
     adminUser: admin
     adminPassword: web3-admin-pw
 
-    # Let our manual PVC handle persistence
     persistence:
-      enabled: false
+      enabled: true
+      size: 50Gi
+      storageClassName: local-storage
 
     ingress:
       enabled: true
       ingressClassName: nginx
       annotations:
-        nginx.ingress.kubernetes.io/rewrite-target: /$1
-        nginx.ingress.kubernetes.io/use-regex: "true"
+        kubernetes.io/ingress.class: nginx
       hosts:
         - grafana.local
-      path: /?(.*)
-      pathType: Prefix
+      path: /
 
     # Configure Loki as a datasource
     datasources:
@@ -216,7 +144,7 @@ loki-stack:
         datasources:
           - name: Loki
             type: loki
-            url: http://{{ .Release.Name }}-loki:3100
+            url: http://{{ .Release.Name }}:3100
             access: proxy
             isDefault: true
           - name: Prometheus
@@ -239,74 +167,81 @@ loki-stack:
             options:
               path: /var/lib/grafana/dashboards/default
 
-# MinIO configuration
-minio:
-  enabled: true
+# Configure Prometheus within the stack
+  prometheus:
+    enabled: true
+    server:
+      # Force deployment on the worker node with our PV
+      nodeSelector:
+        kubernetes.io/hostname: worker0
 
-  # Access credentials
-  rootUser: "minioadmin"
-  rootPassword: "minioadmin"
+      # Resources for Prometheus server
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi
 
-  # Enable the MinIO console
-  console:
+      # Use persistent storage
+      persistentVolume:
+        enabled: true
+        size: 50Gi
+        storageClassName: local-storage
+
+      # Configure Prometheus for better performance
+      retention: 7d  # Keep data for 7 days
+
+      # Add affinity to prefer worker nodes
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - worker0
+
+      # Fixed ingress format for Prometheus chart
+      ingress:
+        enabled: true
+        ingressClassName: nginx
+        annotations:
+          kubernetes.io/ingress.class: nginx
+        hosts:
+          - prometheus.local
+        paths:
+          - /  # Top-level paths array
+        pathType: Prefix
+
+# Configure Prometheus alertmanager
+  alertmanager:
     enabled: true
 
-  # Only need one replica for development
-  mode: standalone
-  replicas: 1
+    # Force deployment on the worker node with our PV
+    nodeSelector:
+      kubernetes.io/hostname: worker0
 
-  # Resources limits
-  resources:
-    requests:
-      memory: 512Mi
-      cpu: 250m
-    limits:
-      memory: 1Gi
-      cpu: 500m
+    # Use persistent storage
+    persistentVolume:
+      enabled: true
+      size: 10Gi
+      storageClassName: local-storage
 
-  # Create default buckets
-  defaultBuckets: "loki-chunks,terraform-state"
-
-  # Service configuration
-  service:
-    type: ClusterIP
-    port: 9000
-
-  # Persistence configuration (for storing data)
-  persistence:
-    enabled: true
-    size: 100Gi
-    storageClass: local-storage
-
-  ingress:
-    enabled: true
-    ingressClassName: nginx
-    annotations:
-      nginx.ingress.kubernetes.io/use-regex: "true"
-      nginx.ingress.kubernetes.io/rewrite-target: /$1
-      nginx.ingress.kubernetes.io/proxy-body-size: "500m"
-      nginx.ingress.kubernetes.io/proxy-connect-timeout: "300"
-      nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-      nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    path: /minio/?(.*)
-    hosts:
-      - grafana.local
-    api:
+    # Configure ingress for alertmanager
+    ingress:
+      enabled: true
+      ingressClassName: nginx
       annotations:
-        nginx.ingress.kubernetes.io/proxy-body-size: "500m"
-      path: /minio-api/?(.*)
+        kubernetes.io/ingress.class: nginx
+      hosts:
+        - host: alertmanager.local
+          paths:
+            - /
+      pathType: Prefix
 
-  # Console ingress
-  consoleIngress:
-    enabled: true
-    ingressClassName: nginx
-    annotations:
-      nginx.ingress.kubernetes.io/use-regex: "true"
-      nginx.ingress.kubernetes.io/rewrite-target: /$1
-      nginx.ingress.kubernetes.io/proxy-body-size: "500m"
-    path: /minio-console/?(.*)
-    hosts:
-      - grafana.local
 
 # Init job configuration for PV setup
 initJob:
@@ -317,10 +252,6 @@ initJob:
   # Commands to run for initializing volumes
   args:
     - |
-      # Create Minio directory with appropriate permissions
-      mkdir -p /storage/minio
-      chmod -R 777 /storage/minio
-
       # Create Loki directories with appropriate permissions
       # Main directories
       mkdir -p /storage/loki/write
@@ -353,7 +284,7 @@ initJob:
       chown -R 65534:65534 /storage/alertmanager
       chmod -R 755 /storage/alertmanager
 
-      echo "Volume initialization completed successfully!"
+      echo "Loki stack volume initialization completed successfully!"
 
 templates:
   pv: true  # Enable PVs for local-storage (required)
