@@ -110,11 +110,6 @@ jobs:
           cd frontend
           pnpm install --frozen-lockfile
 
-      - name: Update version in package.json
-        run: |
-          cd frontend
-          pnpm version ${{ steps.get_version.outputs.version }} --no-git-tag-version
-
       - name: Build frontend
         run: |
           cd frontend
@@ -224,3 +219,33 @@ jobs:
             echo "| 🔗 **Release URL** | [${{ github.repository }}/releases/tag/${{ needs.build-frontend.outputs.tag_name }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.build-frontend.outputs.tag_name }}) |"
             echo "| 📦 **Artifacts** | 1 bundle attached |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  notify-complete:
+    name: Notify Frontend Build Complete
+    needs: [build-frontend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Frontend build complete
+        run: |
+          VERSION="${{ needs.build-frontend.outputs.version }}"
+          ACTOR="${{ needs.build-frontend.outputs.actor || github.actor }}"
+          BUILD_SUCCESS="${{ needs.build-frontend.result == 'success' }}"
+
+          echo "Sending notification for Frontend build completion"
+
+          # Use GitHub API directly to send the notification
+          curl -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+            -d "{
+              \"event_type\": \"frontend-build-complete\",
+              \"client_payload\": {
+                \"version\": \"$VERSION\",
+                \"actor\": \"$ACTOR\",
+                \"success\": \"$BUILD_SUCCESS\"
+              }
+            }"
+
+          echo "::notice::Notification sent for Frontend build completion of version $VERSION"

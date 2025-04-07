@@ -297,3 +297,34 @@ jobs:
             echo "| 🔗 **Release URL** | [${{ github.repository }}/releases/tag/v${{ needs.build-api.outputs.version }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ needs.build-api.outputs.version }}) |"
             echo "| 📦 **Artifacts** | 3+ binaries attached |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Notify the main workflow that the API build is complete
+  notify-complete:
+    name: Notify API Build Complete
+    needs: [build-api]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify API build complete
+        run: |
+          VERSION="${{ needs.build-api.outputs.version }}"
+          ACTOR="${{ needs.build-api.outputs.actor || github.actor }}"
+          BUILD_SUCCESS="${{ needs.build-api.result == 'success' }}"
+
+          echo "Sending notification for API build completion"
+
+          # Use GitHub API directly to send the notification
+          curl -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+            -d "{
+              \"event_type\": \"api-build-complete\",
+              \"client_payload\": {
+                \"version\": \"$VERSION\",
+                \"actor\": \"$ACTOR\",
+                \"success\": \"$BUILD_SUCCESS\"
+              }
+            }"
+
+          echo "::notice::Notification sent for API build completion of version $VERSION"
