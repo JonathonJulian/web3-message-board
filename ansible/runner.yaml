@@ -8,7 +8,7 @@
   gather_facts: true
   vars:
     # Override defaults if needed
-    go_version: "1.23"
+    go_version: "1.22.1"
     node_version: "20"
     pnpm_version: "8"
 
@@ -26,7 +26,7 @@
     kubeconfig_content: "{{ lookup('env', 'KUBECONFIG_CONTENT') | default('') }}"
 
     # Project root directory
-    project_root: "{{ lookup('env', 'GITHUB_WORKSPACE') | default(ansible_env.PWD) }}"
+    project_root: "{{ lookup('env', 'HOME') }}/ansible_runner_env"
 
   roles:
     - role: github_actions_deps
