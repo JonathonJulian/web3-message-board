@@ -231,7 +231,6 @@ ansible-deps:
 .PHONY: ansible-deploy
 ansible-deploy: ansible-deps
 	@echo "Running Ansible playbook..."
-	@echo "Extra vars: $(ANSIBLE_EXTRA_VARS)"
 	@if [ -f ".ansible_venv/bin/activate" ]; then \
 		. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini $(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',); \
 	else \
