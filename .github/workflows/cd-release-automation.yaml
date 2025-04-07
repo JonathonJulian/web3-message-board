@@ -248,21 +248,42 @@ jobs:
           # Update frontend package.json if it exists
           if [ -f "frontend/package.json" ]; then
             echo "Updating frontend/package.json"
-            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" frontend/package.json
+            # Check if version field exists
+            if grep -q '"version"' frontend/package.json; then
+              sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" frontend/package.json
+            else
+              # Add version field after name if it doesn't exist
+              sed -i '/"name":/a \  "version": "'$VERSION'",' frontend/package.json
+            fi
+            cat frontend/package.json
             git add frontend/package.json
           fi
 
           # Update API package.json if it exists
           if [ -f "api/package.json" ]; then
             echo "Updating api/package.json"
-            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" api/package.json
+            # Check if version field exists
+            if grep -q '"version"' api/package.json; then
+              sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" api/package.json
+            else
+              # Add version field after name if it doesn't exist
+              sed -i '/"name":/a \  "version": "'$VERSION'",' api/package.json
+            fi
+            cat api/package.json
             git add api/package.json
           fi
 
           # Update root package.json if it exists
           if [ -f "package.json" ]; then
             echo "Updating root package.json"
-            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
+            # Check if version field exists
+            if grep -q '"version"' package.json; then
+              sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
+            else
+              # Add version field after name if it doesn't exist
+              sed -i '/"name":/a \  "version": "'$VERSION'",' package.json
+            fi
+            cat package.json
             git add package.json
           fi
 
