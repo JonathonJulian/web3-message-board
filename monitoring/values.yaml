@@ -3,6 +3,53 @@
 lokiStack:
   enabled: true  # Enable the loki-stack chart
 
+# Configure Prometheus (disabled for now)
+prometheus:
+  enabled: false
+
+# Configure Prometheus
+prometheus:
+  enabled: true  # Enable Prometheus
+
+  # Server configuration
+  server:
+    persistentVolume:
+      enabled: true
+      size: 50Gi
+      storageClass: local-storage
+
+    # Add nodeSelector to target worker0
+    nodeSelector:
+      kubernetes.io/hostname: worker0
+
+  # Add service monitor for monitoring Kubernetes components
+  kubeStateMetrics:
+    enabled: true
+
+  # Add node exporter to collect host metrics
+  nodeExporter:
+    enabled: true
+
+  # Configure alertmanager
+  alertmanager:
+    enabled: true
+    persistentVolume:
+      enabled: true
+      size: 10Gi
+      storageClass: local-storage
+
+  # Ingress for Prometheus UI
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/rewrite-target: /$1
+      nginx.ingress.kubernetes.io/use-regex: "true"
+    hosts:
+      - grafana.local
+    path: /prometheus/?(.*)
+    pathType: Prefix
+
 # Configure loki-stack chart with correct structure
 loki-stack:
   # Configure loki within the stack
@@ -89,7 +136,7 @@ loki-stack:
             isDefault: true
           - name: Prometheus
             type: prometheus
-            url: http://prometheus-server.web3.svc.cluster.local:80
+            url: http://{{ .Release.Name }}-prometheus-server
             access: proxy
             isDefault: false
 
