@@ -1,5 +1,5 @@
 name: Release Automation
-run-name: Release Process ${{ github.event.inputs.release_type != '' && format('({0})', github.event.inputs.release_type) || '(auto)' }}
+run-name: Release Process ${{ github.event.inputs.release_type != '' && format('({0})', github.event.inputs.release_type) || '(auto)' }}${{ github.event.inputs.deploy_after_release == 'true' && ' + Deploy' || '' }}
 
 permissions:
   contents: write
@@ -21,6 +21,31 @@ on:
           - patch
           - minor
           - major
+      deploy_after_release:
+        description: 'Deploy after release creation'
+        required: false
+        default: false
+        type: boolean
+      deployment_type:
+        description: 'Ansible deployment type (if deploying)'
+        required: false
+        default: 'ansible-deploy'
+        type: choice
+        options:
+          - ansible-deploy
+          - ansible-api
+          - ansible-frontend
+          - ansible-nginx
+          - ansible-logging
+          - ansible-security
+      api_tag:
+        description: 'Custom API tag (overrides auto-versioning, include v prefix)'
+        required: false
+        type: string
+      frontend_tag:
+        description: 'Custom Frontend tag (overrides auto-versioning, include v prefix)'
+        required: false
+        type: string
 
 jobs:
   analyze-commits:
@@ -257,8 +282,14 @@ jobs:
     steps:
       - name: Setup GitHub CLI
         run: |
-          # Authenticate GitHub CLI with the workflow token
-          echo "${{ github.token }}" | gh auth login --with-token
+          # Install GitHub CLI
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh -y
+
+          # Authenticate with GitHub token
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
 
       - name: Wait for builds to complete with polling
         run: |
@@ -507,6 +538,14 @@ jobs:
           # Run with docker-compose
           docker-compose -f docker-compose.yml up -d
           \`\`\`
+
+          ## Deployment Options
+
+          ### Automatic Deployment
+          You can enable automatic deployment when creating a release by setting the \`deploy_after_release\` option to \`true\`.
+
+          ### Manual Deployment
+          To deploy manually after release, run the Ansible deployment workflow with the version tag \`${{ needs.bump-version.outputs.new_tag }}\`.
           EOF
 
       - name: Create Release ${{ needs.bump-version.outputs.new_tag }}
@@ -581,5 +620,100 @@ jobs:
           echo "| **Total** | $TOTAL_COUNT | |" >> $GITHUB_STEP_SUMMARY
 
           echo "### 🚀 Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "To deploy this release, run the Ansible deployment workflow with:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version tag**: ${{ needs.bump-version.outputs.new_tag }}" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ github.event.inputs.deploy_after_release }}" == "true" ]; then
+            echo "✅ **Automatic deployment enabled.** The Ansible deployment workflow will be triggered automatically." >> $GITHUB_STEP_SUMMARY
+            echo "- Deployment type: ${{ github.event.inputs.deployment_type || 'ansible-deploy (full deployment)' }}" >> $GITHUB_STEP_SUMMARY
+
+            if [ -n "${{ github.event.inputs.api_tag }}" ] || [ -n "${{ github.event.inputs.frontend_tag }}" ]; then
+              echo "- Using custom component tags:" >> $GITHUB_STEP_SUMMARY
+
+              if [ -n "${{ github.event.inputs.api_tag }}" ]; then
+                echo "  - API: ${{ github.event.inputs.api_tag }}" >> $GITHUB_STEP_SUMMARY
+              fi
+
+              if [ -n "${{ github.event.inputs.frontend_tag }}" ]; then
+                echo "  - Frontend: ${{ github.event.inputs.frontend_tag }}" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "- Using release tag: ${{ needs.bump-version.outputs.new_tag }}" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "To deploy this release manually, run the Ansible deployment workflow with:" >> $GITHUB_STEP_SUMMARY
+            echo "- **Version tag**: ${{ needs.bump-version.outputs.new_tag }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ==============================================================
+  # Deployment Job - Only runs if deploy_after_release is enabled
+  # ==============================================================
+  deploy-release:
+    name: Deploy Release with Ansible
+    needs: [bump-version, create-release]
+    if: ${{ github.event.inputs.deploy_after_release == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trigger Ansible Deployment
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: deploy-release
+          client-payload: |
+            {
+              "deployment_type": "${{ github.event.inputs.deployment_type }}",
+              "version_tag": "${{ needs.bump-version.outputs.new_tag }}",
+              "api_version": "${{ github.event.inputs.api_tag || needs.bump-version.outputs.new_tag }}",
+              "frontend_version": "${{ github.event.inputs.frontend_tag || needs.bump-version.outputs.new_tag }}",
+              "triggered_by": "release-automation"
+            }
+
+      - name: Generate deployment summary
+        run: |
+          # Determine deployment type name
+          DEPLOYMENT_TYPE="${{ github.event.inputs.deployment_type }}"
+          case "$DEPLOYMENT_TYPE" in
+            ansible-deploy)
+              COMPONENT="Full Infrastructure"
+              ;;
+            ansible-api)
+              COMPONENT="API Service"
+              ;;
+            ansible-frontend)
+              COMPONENT="Frontend Application"
+              ;;
+            ansible-nginx)
+              COMPONENT="Nginx"
+              ;;
+            ansible-logging)
+              COMPONENT="Logging Stack"
+              ;;
+            ansible-security)
+              COMPONENT="Security Settings"
+              ;;
+            *)
+              COMPONENT="Unknown Component"
+              ;;
+          esac
+
+          # Create summary
+          echo "## 🚀 Deployment Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Deployment Information" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 **Component** | $COMPONENT |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏷️ **Release Version** | ${{ needs.bump-version.outputs.new_tag }} |" >> $GITHUB_STEP_SUMMARY
+
+          # Add custom tag information if provided
+          if [ -n "${{ github.event.inputs.api_tag }}" ]; then
+            echo "| 🖥️ **API Tag** | ${{ github.event.inputs.api_tag }} |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -n "${{ github.event.inputs.frontend_tag }}" ]; then
+            echo "| 🌐 **Frontend Tag** | ${{ github.event.inputs.frontend_tag }} |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "### 📝 Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Ansible deployment workflow triggered successfully" >> $GITHUB_STEP_SUMMARY
+          echo "📊 You can monitor the deployment progress in the Actions tab" >> $GITHUB_STEP_SUMMARY
