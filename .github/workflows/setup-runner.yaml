@@ -68,6 +68,9 @@ jobs:
           echo "📋 Kubernetes nodes:"
           kubectl get nodes
 
+          echo "📋 Kubernetes namespaces:"
+          kubectl get namespaces
+
           echo "✅ Kubernetes configuration verified"
 
       - name: Summary
