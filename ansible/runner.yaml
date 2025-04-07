@@ -26,7 +26,7 @@
     kubeconfig_content: "{{ lookup('env', 'KUBECONFIG_CONTENT') | default('') }}"
 
     # Project root directory
-    project_root: "{{ lookup('env', 'GITHUB_WORKSPACE') | default(ansible_env.PWD) }}"
+    project_root: "{{ lookup('env', 'HOME') }}/ansible_runner_env"
 
   roles:
     - role: github_actions_deps
