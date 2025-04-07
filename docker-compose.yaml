@@ -1,0 +1,50 @@
+---
+version: '3.8'
+services:
+  frontend:
+    build:
+      context: ./frontend
+      target: builder
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: pnpm dev
+    environment:
+      - VITE_API_URL=http://api:8080
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./api:/app
+    environment:
+      - ENV=development
+      - PORT=8080
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=message_board
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=message_board
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:
