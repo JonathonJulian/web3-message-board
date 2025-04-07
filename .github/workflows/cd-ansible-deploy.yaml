@@ -28,6 +28,8 @@ on:
         description: 'Version tag to deploy (e.g. v1.0.99, include v prefix)'
         required: false
         type: string
+  repository_dispatch:
+    types: [deploy-release]
 
 jobs:
   # ======================================
@@ -36,7 +38,7 @@ jobs:
   validate-tag:
     name: Validate Tag Exists
     runs-on: ubuntu-latest
-    if: github.event.inputs.version_tag != ''
+    if: github.event.inputs.version_tag != '' || github.event.client_payload.version_tag != ''
     outputs:
       tag_exists: ${{ steps.check-tag.outputs.tag_exists }}
     steps:
@@ -48,7 +50,13 @@ jobs:
       - name: Check if tag exists
         id: check-tag
         run: |
-          TAG="${{  github.event.inputs.version_tag  }}"
+          # Get the tag from inputs or client payload
+          if [ -n "${{ github.event.inputs.version_tag }}" ]; then
+            TAG="${{ github.event.inputs.version_tag }}"
+          else
+            TAG="${{ github.event.client_payload.version_tag }}"
+          fi
+
           echo "🔍 Checking if tag \"$TAG\" exists in the repository..."
 
           if git tag -l | grep -q "^$TAG$"; then
@@ -66,7 +74,7 @@ jobs:
   ansible-deployment:
     name: Run Ansible Deployment
     needs: validate-tag
-    if: github.event.inputs.version_tag == '' || needs.validate-tag.outputs.tag_exists == 'true'
+    if: github.event.inputs.version_tag == '' || github.event.client_payload.version_tag == '' || needs.validate-tag.outputs.tag_exists == 'true'
     runs-on: self-hosted
 
     steps:
@@ -120,7 +128,7 @@ jobs:
           chmod 700 ~/.ssh
 
           # Write the SSH private key
-          echo "${{  secrets.SSH_PRIVATE_KEY  }}" > ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
           # Extract hosts from inventory file and add to known_hosts
@@ -159,20 +167,45 @@ jobs:
           fi
 
           # Set up deployment variables
-          DEPLOYMENT_TYPE="${{  github.event.inputs.deployment_type  }}"
+          # Get deployment type from inputs or client payload
+          if [ -n "${{ github.event.inputs.deployment_type }}" ]; then
+            DEPLOYMENT_TYPE="${{ github.event.inputs.deployment_type }}"
+          else
+            DEPLOYMENT_TYPE="${{ github.event.client_payload.deployment_type }}"
+          fi
+
           EXTRA_VARS=""
 
           # Version tag handling
-          if [ -n "${{  github.event.inputs.version_tag  }}" ]; then
-            VERSION_TAG="${{  github.event.inputs.version_tag  }}"
+          # Get version tag from inputs or client payload
+          if [ -n "${{ github.event.inputs.version_tag }}" ]; then
+            VERSION_TAG="${{ github.event.inputs.version_tag }}"
+          elif [ -n "${{ github.event.client_payload.version_tag }}" ]; then
+            VERSION_TAG="${{ github.event.client_payload.version_tag }}"
+          fi
+
+          if [ -n "$VERSION_TAG" ]; then
             VERSION_NUMBER="${VERSION_TAG#v}"
             echo "📌 Using version tag: \"$VERSION_TAG\" (\"$VERSION_NUMBER\")"
             EXTRA_VARS="api_release_version=\"$VERSION_NUMBER\" frontend_release_version=\"$VERSION_NUMBER\""
           fi
 
-          # Build the tags parameter based on deployment type
-          DEPLOYMENT_TYPE="${{  github.event.inputs.deployment_type  }}"
+          # Additional component-specific version handling for repository_dispatch
+          if [ -n "${{ github.event.client_payload.api_version }}" ]; then
+            API_VERSION="${{ github.event.client_payload.api_version }}"
+            API_VERSION_NUMBER="${API_VERSION#v}"
+            echo "📌 Using custom API version: \"$API_VERSION\" (\"$API_VERSION_NUMBER\")"
+            EXTRA_VARS="$EXTRA_VARS api_release_version=\"$API_VERSION_NUMBER\""
+          fi
 
+          if [ -n "${{ github.event.client_payload.frontend_version }}" ]; then
+            FRONTEND_VERSION="${{ github.event.client_payload.frontend_version }}"
+            FRONTEND_VERSION_NUMBER="${FRONTEND_VERSION#v}"
+            echo "📌 Using custom Frontend version: \"$FRONTEND_VERSION\" (\"$FRONTEND_VERSION_NUMBER\")"
+            EXTRA_VARS="$EXTRA_VARS frontend_release_version=\"$FRONTEND_VERSION_NUMBER\""
+          fi
+
+          # Build the tags parameter based on deployment type
           # Extract clean tag name from deployment type (remove "ansible-" prefix)
           if [ "$DEPLOYMENT_TYPE" = "ansible-deploy" ]; then
             # Full deployment doesn't use tags
@@ -203,11 +236,11 @@ jobs:
           echo "🎯 Deploying component: \"$COMPONENT\""
 
           # Set up additional extra vars and run the deployment
-          ALL_EXTRA_VARS="github_token=\"?$GITHUB_TOKEN"?\" ansible_user=ubuntu $EXTRA_VARS"
+          ALL_EXTRA_VARS="github_token=\"$GITHUB_TOKEN\" ansible_user=ubuntu $EXTRA_VARS"
 
           echo "🔧 Running make \"$DEPLOYMENT_TYPE\" with the following parameters:"
-          echo "   → Extra vars: github_token=*** ${EXTRA_VARS##*( )}"
-          echo "   → Tags: ${TAG_PARAM##*( )}"
+          echo "   → Extra vars: github_token=*** ${EXTRA_VARS}"
+          echo "   → Tags: ${TAG_PARAM}"
 
           make "$DEPLOYMENT_TYPE" ANSIBLE_EXTRA_VARS="$ALL_EXTRA_VARS"
 
@@ -218,23 +251,46 @@ jobs:
       # --------------------------------
       - name: Deployment summary
         run: |
+          # Get deployment type from inputs or client payload
+          if [ -n "${{ github.event.inputs.deployment_type }}" ]; then
+            DEPLOYMENT_TYPE="${{ github.event.inputs.deployment_type }}"
+          else
+            DEPLOYMENT_TYPE="${{ github.event.client_payload.deployment_type }}"
+          fi
+
+          # Get version tag from inputs or client payload
+          if [ -n "${{ github.event.inputs.version_tag }}" ]; then
+            VERSION_TAG="${{ github.event.inputs.version_tag }}"
+          elif [ -n "${{ github.event.client_payload.version_tag }}" ]; then
+            VERSION_TAG="${{ github.event.client_payload.version_tag }}"
+          fi
+
           {
             echo "## 📋 Deployment Summary"
             echo "### 🛠️ Deployment Configuration"
             echo "| Setting | Value |"
             echo "| --- | --- |"
-            echo "| ⚙️ **Deployment type** | ${{  github.event.inputs.deployment_type  }} |"
+            echo "| ⚙️ **Deployment type** | $DEPLOYMENT_TYPE |"
             echo "| 🔐 **Authentication method** | SSH key |"
             echo "| 👤 **User** | ubuntu |"
             echo "| 🖥️ **Target servers** | Using inventory file |"
 
-            if [ -n "${{  github.event.inputs.version_tag  }}" ]; then
-              echo "| 📦 **Version Tag** | ${{  github.event.inputs.version_tag  }} |"
+            if [ -n "$VERSION_TAG" ]; then
+              echo "| 📦 **Version Tag** | $VERSION_TAG |"
+            fi
+
+            # Display component-specific versions if set
+            if [ -n "${{ github.event.client_payload.api_version }}" ]; then
+              echo "| 🖥️ **API Version** | ${{ github.event.client_payload.api_version }} |"
+            fi
+
+            if [ -n "${{ github.event.client_payload.frontend_version }}" ]; then
+              echo "| 🌐 **Frontend Version** | ${{ github.event.client_payload.frontend_version }} |"
             fi
 
             echo "### 📊 Deployment Status"
 
-            case "${{  github.event.inputs.deployment_type  }}" in
+            case "$DEPLOYMENT_TYPE" in
               ansible-deploy)
                 echo "✅ **Full Ansible playbook executed**"
                 ;;

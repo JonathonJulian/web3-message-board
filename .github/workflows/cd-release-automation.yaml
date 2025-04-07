@@ -655,61 +655,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup GitHub CLI
-        run: |
-          # Install GitHub CLI
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-          sudo apt update
-          sudo apt install gh -y
-
-          # Authenticate with GitHub token
-          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
-
-      - name: Trigger Ansible Deployment Workflow
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "🚀 Starting deployment process..."
-
-          # Determine which tags to use
-          API_TAG="${{ github.event.inputs.api_tag }}"
-          FRONTEND_TAG="${{ github.event.inputs.frontend_tag }}"
-          DEFAULT_TAG="${{ needs.bump-version.outputs.new_tag }}"
-          DEPLOYMENT_TYPE="${{ github.event.inputs.deployment_type }}"
-
-          # If custom tags are not provided, use the default tag
-          [ -z "$API_TAG" ] && API_TAG="$DEFAULT_TAG"
-          [ -z "$FRONTEND_TAG" ] && FRONTEND_TAG="$DEFAULT_TAG"
-
-          echo "Using the following configuration:"
-          echo "- Deployment type: $DEPLOYMENT_TYPE"
-          echo "- API tag: $API_TAG"
-          echo "- Frontend tag: $FRONTEND_TAG"
-
-          # Set version tag based on deployment type
-          if [[ "$DEPLOYMENT_TYPE" == "ansible-api" ]]; then
-            VERSION_TAG="$API_TAG"
-            echo "Setting version tag to API tag: $VERSION_TAG"
-          elif [[ "$DEPLOYMENT_TYPE" == "ansible-frontend" ]]; then
-            VERSION_TAG="$FRONTEND_TAG"
-            echo "Setting version tag to Frontend tag: $VERSION_TAG"
-          else
-            # For full deployment or other components, use the default tag
-            VERSION_TAG="$DEFAULT_TAG"
-            echo "Setting version tag to default tag: $VERSION_TAG"
-          fi
-
-          # Trigger the deployment workflow
-          echo "Triggering Ansible deployment workflow..."
-          gh workflow run cd-ansible-deploy.yaml \
-            -f deployment_type="$DEPLOYMENT_TYPE" \
-            -f version_tag="$VERSION_TAG"
-
-          echo "✅ Deployment workflow triggered successfully"
-          echo "📊 Deployment details:"
-          echo "   → Type: $DEPLOYMENT_TYPE"
-          echo "   → Version: $VERSION_TAG"
+      - name: Trigger Ansible Deployment
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: deploy-release
+          client-payload: |
+            {
+              "deployment_type": "${{ github.event.inputs.deployment_type }}",
+              "version_tag": "${{ needs.bump-version.outputs.new_tag }}",
+              "api_version": "${{ github.event.inputs.api_tag || needs.bump-version.outputs.new_tag }}",
+              "frontend_version": "${{ github.event.inputs.frontend_tag || needs.bump-version.outputs.new_tag }}",
+              "triggered_by": "release-automation"
+            }
 
       - name: Generate deployment summary
         run: |
