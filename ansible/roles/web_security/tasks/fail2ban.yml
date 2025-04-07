@@ -30,17 +30,6 @@
   notify: Restart fail2ban
   tags: ['security', 'fail2ban']
 
-# Configure Nginx badbots filter
-- name: Create fail2ban Nginx badbots filter
-  ansible.builtin.template:
-    src: fail2ban_nginx_badbots.conf.j2
-    dest: /etc/fail2ban/filter.d/nginx-badbots.conf
-    owner: root
-    group: root
-    mode: 0644
-  notify: Restart fail2ban
-  tags: ['security', 'fail2ban']
-
 # Make sure the socket directory exists with correct permissions
 - name: Ensure fail2ban socket directory exists
   ansible.builtin.file:
