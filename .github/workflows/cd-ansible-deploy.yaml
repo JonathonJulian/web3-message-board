@@ -82,39 +82,21 @@ jobs:
         uses: actions/checkout@v4
 
       # --------------------------------
-      # Setup environment dependencies
+      # Setup basic dependencies
       # --------------------------------
-      - name: Setup runner dependencies
+      - name: Setup basic dependencies
         run: |
-          echo "🔧 Setting up runner dependencies..."
+          echo "🔧 Setting up basic Ansible dependencies..."
 
-          # Try using Make target first for runner setup
-          if grep -q "github-runner-setup" Makefile; then
-            echo "📦 Setting up dependencies using Makefile target..."
-            make github-runner-setup
-          elif [ -f "ansible/github_actions_setup.yml" ]; then
-            echo "📦 Setting up dependencies using Ansible playbook directly..."
-
-            # Create a temporary inventory file for localhost
-            echo "[github_runners]" > /tmp/github_runner_inventory.ini
-            echo "localhost ansible_connection=local" >> /tmp/github_runner_inventory.ini
-
-            # Run the Ansible playbook locally
-            ansible-playbook ansible/github_actions_setup.yml -i /tmp/github_runner_inventory.ini -e "project_root=$(pwd)"
-          else
-            echo "⚠️ No Ansible GitHub Actions setup playbook found. Aborting."
-            exit 1
+          # Install Python and Ansible if not present
+          if ! command -v ansible &> /dev/null; then
+            echo "📦 Installing Ansible..."
+            python3 -m pip install --upgrade pip
+            python3 -m pip install ansible
           fi
 
-          # Verify installations
-          echo "✅ Dependency installation complete"
-          echo "🐍 Python version: $(python3 --version)"
-          echo "🔄 Ansible version: $(ansible --version | head -n1)"
-          if command -v gh &> /dev/null; then
-            echo "🐙 GitHub CLI version: $(gh --version | head -n1)"
-          else
-            echo "🐙 GitHub CLI not installed"
-          fi
+          # Verify Ansible installation
+          echo "✅ Ansible version: $(ansible --version | head -n1)"
 
       # --------------------------------
       # Setup SSH authentication
