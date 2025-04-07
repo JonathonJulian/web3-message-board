@@ -231,10 +231,11 @@ ansible-deps:
 .PHONY: ansible-deploy
 ansible-deploy: ansible-deps
 	@echo "Running Ansible playbook..."
+	@echo "Extra vars: $(ANSIBLE_EXTRA_VARS)"
 	@if [ -f ".ansible_venv/bin/activate" ]; then \
-		. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini; \
+		. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini $(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',); \
 	else \
-		cd ansible && ansible-playbook msg_board.yaml -i inventory.ini; \
+		cd ansible && ansible-playbook msg_board.yaml -i inventory.ini $(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',); \
 	fi
 
 .PHONY: ansible-deploy-ssh
@@ -242,7 +243,8 @@ ansible-deploy-ssh: ansible-deps
 	@echo "Running Ansible playbook with SSH key authentication..."
 	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini \
 		--private-key=$(SSH_KEY_FILE) \
-		-e 'auth={"method":"ssh_key"}'
+		-e 'auth={"method":"ssh_key"}' \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-deploy-password
 ansible-deploy-password: ansible-deps
@@ -254,37 +256,44 @@ ansible-deploy-password: ansible-deps
 	@echo "Running Ansible playbook with password authentication..."
 	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini \
 		--extra-vars "ansible_password=$(SSH_PASSWORD) ansible_become_password=$(SSH_PASSWORD)" \
-		-e 'auth={"method":"password"}'
+		-e 'auth={"method":"password"}' \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-nginx
 ansible-nginx: ansible-deps
 	@echo "Running Ansible Nginx role..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags nginx
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags nginx \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-frontend
 ansible-frontend: ansible-deps
 	@echo "Running Ansible frontend role..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags frontend
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags frontend \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-logging
 ansible-logging: ansible-deps
 	@echo "Running Ansible logging role..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags logging
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags logging \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-api
 ansible-api: ansible-deps
 	@echo "Running Go role for API..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags api
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags api \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-security
 ansible-security: ansible-deps
 	@echo "Running Ansible security roles..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags security,users,firewall,ssh
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags security,users,firewall,ssh \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-hosts
 ansible-hosts: ansible-deps
 	@echo "Running hosts role..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags hosts
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags hosts \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 # Complete Environment Management
 .PHONY: setup-all

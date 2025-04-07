@@ -161,7 +161,7 @@ jobs:
           if [ -n "$VERSION_TAG" ]; then
             VERSION_NUMBER="${VERSION_TAG#v}"
             echo "📌 Using version tag: \"$VERSION_TAG\" (\"$VERSION_NUMBER\")"
-            EXTRA_VARS="api_release_version=\"$VERSION_NUMBER\" frontend_release_version=\"$VERSION_NUMBER\" service_release_version=\"$VERSION_TAG\""
+            EXTRA_VARS="service_release_version=\"$VERSION_TAG\" api_release_version=\"$VERSION_NUMBER\" frontend_release_version=\"$VERSION_NUMBER\""
           fi
 
           # Additional component-specific version handling for repository_dispatch
