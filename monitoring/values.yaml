@@ -36,81 +36,78 @@ loki-stack:
       size: 50Gi
       storageClassName: local-storage
 
-# Configure promtail within the stack
-promtail:
-  enabled: true
-  config:
-    clients:
-      - url: http://{{ .Release.Name }}-loki:3100/loki/api/v1/push
+  # Configure promtail within the stack
+  promtail:
+    enabled: true
+    config:
+      clients:
+        - url: http://{{ .Release.Name }}-loki:3100/loki/api/v1/push
 
-grafana:
-  enabled: false  # We use the dedicated Grafana chart
+  # Configure Grafana within the stack
+  grafana:
+    enabled: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 256Mi
 
-# Standalone Grafana configuration
-# DUPLICATE SECTION - COMMENTED OUT: grafana:
-#   enabled: true
-#   resources:
-#     requests:
-#       cpu: 100m
-#       memory: 128Mi
-#     limits:
-#       cpu: 300m
-#       memory: 256Mi
-#
-#   # Force deployment on the worker node with our PV
-#   nodeSelector:
-#     kubernetes.io/hostname: worker0
-#
-#   # Default admin credentials
-#   adminUser: admin
-#   adminPassword: monad-admin-pw
-#
-#   # Let our manual PVC handle persistence
-#   persistence:
-#     enabled: false
-#
-#   ingress:
-#     enabled: true
-#     ingressClassName: nginx
-#     annotations:
-#       nginx.ingress.kubernetes.io/rewrite-target: /$1
-#       nginx.ingress.kubernetes.io/use-regex: "true"
-#     hosts:
-#       - grafana.local
-#     path: /?(.*)
-#     pathType: Prefix
-#
-#   # Configure Loki as a datasource
-#   datasources:
-#     datasources.yaml:
-#       apiVersion: 1
-#       datasources:
-#         - name: Loki
-#           type: loki
-#           url: http://{{ .Release.Name }}-loki:3100
-#           access: proxy
-#           isDefault: true
-#         - name: Prometheus
-#           type: prometheus
-#           url: http://prometheus-server.monitoring.svc.cluster.local:80
-#           access: proxy
-#           isDefault: false
-#
-#   # Dashboards to provision
-#   dashboardProviders:
-#     dashboardproviders.yaml:
-#       apiVersion: 1
-#       providers:
-#         - name: 'default'
-#           orgId: 1
-#           folder: ''
-#           type: file
-#           disableDeletion: false
-#           editable: true
-#           options:
-#             path: /var/lib/grafana/dashboards/default
-#
-# # MinIO configuration
+    # Force deployment on the worker node with our PV
+    nodeSelector:
+      kubernetes.io/hostname: worker0
+
+    # Default admin credentials
+    adminUser: admin
+    adminPassword: monad-admin-pw
+
+    # Let our manual PVC handle persistence
+    persistence:
+      enabled: false
+
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /$1
+        nginx.ingress.kubernetes.io/use-regex: "true"
+      hosts:
+        - grafana.local
+      path: /?(.*)
+      pathType: Prefix
+
+    # Configure Loki as a datasource
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: Loki
+            type: loki
+            url: http://{{ .Release.Name }}-loki:3100
+            access: proxy
+            isDefault: true
+          - name: Prometheus
+            type: prometheus
+            url: http://prometheus-server.monitoring.svc.cluster.local:80
+            access: proxy
+            isDefault: false
+
+    # Dashboards to provision
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: 'default'
+            orgId: 1
+            folder: ''
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/default
+
+# MinIO configuration
 minio:
   enabled: true
 
