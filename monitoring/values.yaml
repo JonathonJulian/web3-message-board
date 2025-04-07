@@ -3,6 +3,67 @@
 lokiStack:
   enabled: true  # Enable the loki-stack chart
 
+# Configure Prometheus (enabled)
+prometheus:
+  enabled: true  # Enable Prometheus
+
+  # Server configuration
+  server:
+    persistentVolume:
+      enabled: true
+      size: 50Gi
+      storageClass: local-storage
+
+    # Add nodeSelector to target worker0
+    nodeSelector:
+      kubernetes.io/hostname: worker0
+
+    # Fix permission issues
+    securityContext:
+      runAsUser: 65534
+      runAsNonRoot: true
+      runAsGroup: 65534
+      fsGroup: 65534
+
+  # Add service monitor for monitoring Kubernetes components
+  kubeStateMetrics:
+    enabled: true
+
+  # Add node exporter to collect host metrics
+  nodeExporter:
+    enabled: true
+
+  # Configure alertmanager
+  alertmanager:
+    enabled: true
+    persistentVolume:
+      enabled: true
+      size: 10Gi
+      storageClass: local-storage
+
+    # Add nodeSelector to target worker0
+    nodeSelector:
+      kubernetes.io/hostname: worker0
+
+    # Fix permission issues
+    securityContext:
+      runAsUser: 65534
+      runAsNonRoot: true
+      runAsGroup: 65534
+      fsGroup: 65534
+
+  # Ingress for Prometheus UI
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/rewrite-target: /$1
+      nginx.ingress.kubernetes.io/use-regex: "true"
+    hosts:
+      - grafana.local
+    path: /prometheus/?(.*)
+    pathType: Prefix
+
 # Configure loki-stack chart with correct structure
 loki-stack:
   # Configure loki within the stack
@@ -36,81 +97,78 @@ loki-stack:
       size: 50Gi
       storageClassName: local-storage
 
-# Configure promtail within the stack
-promtail:
-  enabled: true
-  config:
-    clients:
-      - url: http://{{ .Release.Name }}-loki:3100/loki/api/v1/push
+  # Configure promtail within the stack
+  promtail:
+    enabled: true
+    config:
+      clients:
+        - url: http://{{ .Release.Name }}-loki:3100/loki/api/v1/push
 
-grafana:
-  enabled: false  # We use the dedicated Grafana chart
+  # Configure Grafana within the stack
+  grafana:
+    enabled: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 256Mi
 
-# Standalone Grafana configuration
-# DUPLICATE SECTION - COMMENTED OUT: grafana:
-#   enabled: true
-#   resources:
-#     requests:
-#       cpu: 100m
-#       memory: 128Mi
-#     limits:
-#       cpu: 300m
-#       memory: 256Mi
-#
-#   # Force deployment on the worker node with our PV
-#   nodeSelector:
-#     kubernetes.io/hostname: worker0
-#
-#   # Default admin credentials
-#   adminUser: admin
-#   adminPassword: monad-admin-pw
-#
-#   # Let our manual PVC handle persistence
-#   persistence:
-#     enabled: false
-#
-#   ingress:
-#     enabled: true
-#     ingressClassName: nginx
-#     annotations:
-#       nginx.ingress.kubernetes.io/rewrite-target: /$1
-#       nginx.ingress.kubernetes.io/use-regex: "true"
-#     hosts:
-#       - grafana.local
-#     path: /?(.*)
-#     pathType: Prefix
-#
-#   # Configure Loki as a datasource
-#   datasources:
-#     datasources.yaml:
-#       apiVersion: 1
-#       datasources:
-#         - name: Loki
-#           type: loki
-#           url: http://{{ .Release.Name }}-loki:3100
-#           access: proxy
-#           isDefault: true
-#         - name: Prometheus
-#           type: prometheus
-#           url: http://prometheus-server.monitoring.svc.cluster.local:80
-#           access: proxy
-#           isDefault: false
-#
-#   # Dashboards to provision
-#   dashboardProviders:
-#     dashboardproviders.yaml:
-#       apiVersion: 1
-#       providers:
-#         - name: 'default'
-#           orgId: 1
-#           folder: ''
-#           type: file
-#           disableDeletion: false
-#           editable: true
-#           options:
-#             path: /var/lib/grafana/dashboards/default
-#
-# # MinIO configuration
+    # Force deployment on the worker node with our PV
+    nodeSelector:
+      kubernetes.io/hostname: worker0
+
+    # Default admin credentials
+    adminUser: admin
+    adminPassword: monad-admin-pw
+
+    # Let our manual PVC handle persistence
+    persistence:
+      enabled: false
+
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /$1
+        nginx.ingress.kubernetes.io/use-regex: "true"
+      hosts:
+        - grafana.local
+      path: /?(.*)
+      pathType: Prefix
+
+    # Configure Loki as a datasource
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: Loki
+            type: loki
+            url: http://{{ .Release.Name }}-loki:3100
+            access: proxy
+            isDefault: true
+          - name: Prometheus
+            type: prometheus
+            url: http://{{ .Release.Name }}-prometheus-server
+            access: proxy
+            isDefault: false
+
+    # Dashboards to provision
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: 'default'
+            orgId: 1
+            folder: ''
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/default
+
+# MinIO configuration
 minio:
   enabled: true
 
@@ -185,6 +243,46 @@ initJob:
   image: "busybox:latest"
   imagePullPolicy: "IfNotPresent"
 
-# Template configuration - controls which templates are active
+  # Commands to run for initializing volumes
+  args:
+    - |
+      # Create Minio directory with appropriate permissions
+      mkdir -p /storage/minio
+      chmod -R 777 /storage/minio
+
+      # Create Loki directories with appropriate permissions
+      # Main directories
+      mkdir -p /storage/loki/write
+      mkdir -p /storage/loki/backend
+
+      # Create subdirectories that Loki expects
+      mkdir -p /storage/loki/write/data/loki
+      mkdir -p /storage/loki/write/data/loki/boltdb-shipper-active
+      mkdir -p /storage/loki/write/data/loki/boltdb-shipper-cache
+      mkdir -p /storage/loki/write/data/loki/chunks
+      mkdir -p /storage/loki/write/data/loki/index
+
+      # Setting very permissive permissions to avoid issues
+      chmod -R 777 /storage/loki
+
+      # Create Grafana directory with appropriate permissions
+      mkdir -p /storage/grafana
+      # Grafana runs as user 472
+      chmod -R 777 /storage/grafana
+
+      # Create Prometheus directories with appropriate permissions
+      mkdir -p /storage/prometheus
+      # Prometheus runs as nobody (UID 65534)
+      chown -R 65534:65534 /storage/prometheus
+      chmod -R 755 /storage/prometheus
+
+      # Create AlertManager directories with appropriate permissions
+      mkdir -p /storage/alertmanager
+      # AlertManager also runs as nobody (UID 65534)
+      chown -R 65534:65534 /storage/alertmanager
+      chmod -R 755 /storage/alertmanager
+
+      echo "Volume initialization completed successfully!"
+
 templates:
   pv: true  # Enable PVs for local-storage (required)

@@ -1,10 +1,9 @@
 # Makefile for managing infrastructure, helm deployments, and configuration
 # Variables
 ANSIBLE_INVENTORY ?= ansible/inventory.ini
-ANSIBLE_VAULT_PASS ?= ansible/.vault_pass
-HELM_NAMESPACE ?= monad
-VM_NAME ?= web-server-nginx-cloud-5
-KUBERNETES_CONTEXT ?= k3s-main
+HELM_NAMESPACE ?= web3
+VM_NAME ?= web-server-nginx
+KUBERNETES_CONTEXT ?= default
 
 # Docker variables
 DOCKER_REGISTRY ?= ghcr.io
