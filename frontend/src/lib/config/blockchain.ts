@@ -1,5 +1,5 @@
 // Network configuration for the application
-export type NetworkKey = 'nomad' | 'localhost';
+export type NetworkKey = 'monad' | 'localhost';
 
 export type NetworkConfig = {
   name: string;
@@ -9,9 +9,9 @@ export type NetworkConfig = {
 };
 
 export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
-  nomad: {
-    name: 'Nomad',
-    chainId: 421614,
+  monad: {
+    name: 'Monad',
+    chainId: 10143,
     rpcUrl: 'https://arbitrum-sepolia.infura.io/v3/95267af4ac9947e488119d2052311552',
     isTestnet: true
   },

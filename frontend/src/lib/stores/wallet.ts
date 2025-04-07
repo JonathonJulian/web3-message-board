@@ -10,18 +10,18 @@ const MessageBoardABI = [
 ];
 
 // Contract address
-export const CONTRACT_ADDRESS = '0xd0139AD9718a6C634Ebf0b21f75dE5BD2936035E'; // Updated contract address on Nomad
+export const CONTRACT_ADDRESS = '0xd0139AD9718a6C634Ebf0b21f75dE5BD2936035E'; // Updated contract address on Monad
 
 // RPC URLs
-export const NOMAD_RPC_URL = 'https://arbitrum-sepolia.infura.io/v3/95267af4ac9947e488119d2052311552';
+export const MONAD_RPC_URL = 'https://arbitrum-sepolia.infura.io/v3/95267af4ac9947e488119d2052311552';
 // Fallback for local development - keep as reference for debugging
 // const LOCAL_RPC_URL = 'http://localhost:8080';
 
-// Use Nomad by default
-// const RPC_URL = NOMAD_RPC_URL;
+// Use Monad by default
+// const RPC_URL = MONAD_RPC_URL;
 
 // Define if we're in simulation mode
-const IS_SIMULATION_MODE = false; // Set to false since we're using real Nomad
+const IS_SIMULATION_MODE = false; // Set to false since we're using real Monad
 
 // Define types
 type Message = {
@@ -38,7 +38,7 @@ export const messages = writable<Message[]>([]);
 export const isConnected = writable<boolean>(false);
 export const chainId = writable<number | null>(null);
 export const isSimulated = writable<boolean>(false);
-export const networkName = writable<string>('nomad'); // Default to Nomad network
+export const networkName = writable<string>('monad'); // Default to Monad network
 
 // Initialize Web3Modal
 let web3Modal: any;
@@ -288,9 +288,9 @@ export async function postMessage(content: string) {
       const network = await walletProvider.getNetwork();
       console.log("Current network:", network);
 
-      if (network.chainId !== 421614) {
-        console.error(`Wrong network! Connected to ${network.name} (${network.chainId}), need to be on Nomad (421614)`);
-        throw new Error(`Please connect to Nomad network in your wallet (current: ${network.name})`);
+      if (network.chainId !== 10143) {
+        console.error(`Wrong network! Connected to ${network.name} (${network.chainId}), need to be on Monad (10143)`);
+        throw new Error(`Please connect to Monad network in your wallet (current: ${network.name})`);
       }
     }
 
@@ -368,9 +368,9 @@ export async function likeMessage(messageId: number) {
       const network = await walletProvider.getNetwork();
       console.log("Current network for like operation:", network);
 
-      if (network.chainId !== 421614) {
-        console.error(`Wrong network! Connected to ${network.name} (${network.chainId}), need to be on Nomad (421614)`);
-        throw new Error(`Please connect to Nomad network in your wallet (current: ${network.name})`);
+      if (network.chainId !== 10143) {
+        console.error(`Wrong network! Connected to ${network.name} (${network.chainId}), need to be on Monad (10143)`);
+        throw new Error(`Please connect to Monad network in your wallet (current: ${network.name})`);
       }
     }
 
