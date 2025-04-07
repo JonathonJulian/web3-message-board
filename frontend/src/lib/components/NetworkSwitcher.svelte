@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { NETWORKS, switchNetwork } from '../config/ethereum';
+  import { NETWORKS, switchNetwork, type NetworkKey } from '../config/blockchain';
   import { networkName, isConnected } from '../stores/wallet';
 
   let isOpen = false;
@@ -7,7 +7,7 @@
   let error = '';
 
   // Handle network switch
-  async function handleNetworkSwitch(network: string) {
+  async function handleNetworkSwitch(network: NetworkKey) {
     if (!$isConnected) return;
 
     switchingNetwork = true;
@@ -36,7 +36,7 @@
     disabled={!$isConnected || switchingNetwork}
   >
     <span class="inline-block w-2 h-2 rounded-full bg-green-400 mr-1"></span>
-    {NETWORKS[$networkName]?.name || 'Unknown Network'}
+    {NETWORKS[$networkName as NetworkKey]?.name || 'Unknown Network'}
     <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
     </svg>
@@ -47,7 +47,7 @@
       {#each Object.entries(NETWORKS) as [key, network]}
         <button
           class="w-full text-left px-4 py-2 hover:bg-gray-700 text-sm {$networkName === key ? 'bg-gray-700' : ''}"
-          on:click={() => handleNetworkSwitch(key)}
+          on:click={() => handleNetworkSwitch(key as NetworkKey)}
           disabled={switchingNetwork || $networkName === key}
         >
           <div class="flex items-center">

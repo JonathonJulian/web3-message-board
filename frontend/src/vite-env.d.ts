@@ -22,7 +22,7 @@ declare module 'web3modal' {
   }
 }
 
-// Ethereum provider interface for window.ethereum
+// Blockchain provider interface for window.ethereum
 interface Window {
   ethereum?: {
     isMetaMask?: boolean;
