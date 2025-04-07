@@ -26,6 +26,10 @@ This Ansible role installs and configures all dependencies needed for GitHub Act
 | `install_pnpm` | true | Whether to install pnpm |
 | `install_ansible` | true | Whether to install Ansible |
 | `install_github_cli` | true | Whether to install GitHub CLI |
+| `install_kubectl` | true | Whether to install kubectl |
+| `kubectl_version` | "1.28.2" | kubectl version to install |
+| `setup_kubernetes` | false | Whether to configure Kubernetes context |
+| `kubeconfig_content` | "" | Content of kubeconfig file (can be set from GitHub Actions secrets) |
 
 ## Usage
 
@@ -50,6 +54,29 @@ This Ansible role installs and configures all dependencies needed for GitHub Act
 
     # Run the Ansible playbook locally
     ansible-playbook ansible/github_actions_setup.yml -i /tmp/github_runner_inventory.ini -e "project_root=$(pwd)"
+```
+
+### Setting up Kubernetes with GitHub Actions
+
+To configure Kubernetes in your GitHub workflow:
+
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Kubernetes context
+        run: |
+          ansible-playbook ansible/runner.yaml -i /tmp/github_runner_inventory.ini \
+            -e "setup_kubernetes=true" \
+            -e "kubeconfig_content=${{ secrets.KUBECONFIG }}"
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -f k8s/deployment.yaml
 ```
 
 ### Using with Make

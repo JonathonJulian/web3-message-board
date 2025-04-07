@@ -1,0 +1,89 @@
+name: Setup Runner Environment
+on:
+  workflow_dispatch:
+    inputs:
+      setup_kubernetes:
+        description: 'Configure Kubernetes context'
+        type: boolean
+        default: false
+        required: false
+      kubectl_version:
+        description: 'kubectl version to install'
+        type: string
+        default: '1.28.2'
+        required: false
+
+jobs:
+  setup-runner:
+    name: Configure Runner Environment
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Ansible dependencies
+        run: |
+          echo "📦 Installing Ansible dependencies..."
+          make ansible-deps
+
+      - name: Create temporary inventory
+        run: |
+          echo "🔧 Creating local inventory file..."
+          mkdir -p /tmp
+          echo "[github_runners]" > /tmp/github_runner_inventory.ini
+          echo "localhost ansible_connection=local" >> /tmp/github_runner_inventory.ini
+
+      - name: Run runner setup playbook
+        env:
+          SETUP_KUBERNETES: ${{ inputs.setup_kubernetes }}
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+          KUBECTL_VERSION: ${{ inputs.kubectl_version }}
+        run: |
+          echo "🚀 Setting up runner environment..."
+
+          # Set kubectl version if provided
+          EXTRA_VARS=""
+          if [ -n "$KUBECTL_VERSION" ]; then
+            EXTRA_VARS="kubectl_version=$KUBECTL_VERSION"
+          fi
+
+          # Run the playbook
+          ansible-playbook ansible/runner.yaml \
+            -i /tmp/github_runner_inventory.ini \
+            -e "$EXTRA_VARS"
+
+          echo "✅ Runner environment setup completed"
+
+      - name: Verify Kubernetes setup
+        if: inputs.setup_kubernetes
+        run: |
+          echo "🔍 Verifying Kubernetes configuration..."
+
+          # Show current context
+          echo "📋 Current kubectl context:"
+          kubectl config current-context
+
+          # Get nodes
+          echo "📋 Kubernetes nodes:"
+          kubectl get nodes
+
+          echo "✅ Kubernetes configuration verified"
+
+      - name: Summary
+        run: |
+          {
+            echo "## 📋 Runner Setup Summary"
+            echo "### 🛠️ Configuration"
+            echo "| Setting | Value |"
+            echo "| --- | --- |"
+            echo "| ⚙️ **Kubernetes setup** | ${{ inputs.setup_kubernetes }} |"
+            echo "| 🔧 **kubectl version** | ${{ inputs.kubectl_version || '1.28.2' }} |"
+
+            if [[ "${{ inputs.setup_kubernetes }}" == "true" ]]; then
+              echo ""
+              echo "### 🔍 Kubernetes Verification"
+              echo "✅ **Kubernetes context configured**"
+              echo "✅ **kubectl installed and working**"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

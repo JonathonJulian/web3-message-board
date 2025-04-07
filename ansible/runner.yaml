@@ -19,6 +19,12 @@
     install_ansible: true
     install_github_cli: true
 
+    # Kubernetes configuration
+    install_kubectl: true
+    kubectl_version: "1.28.2"
+    setup_kubernetes: "{{ lookup('env', 'SETUP_KUBERNETES') | default(false) | bool }}"
+    kubeconfig_content: "{{ lookup('env', 'KUBECONFIG_CONTENT') | default('') }}"
+
     # Project root directory
     project_root: "{{ lookup('env', 'GITHUB_WORKSPACE') | default(ansible_env.PWD) }}"
 

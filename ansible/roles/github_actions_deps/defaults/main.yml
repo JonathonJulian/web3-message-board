@@ -20,3 +20,9 @@ install_node: true
 install_pnpm: true
 install_ansible: true
 install_github_cli: true
+
+# Kubernetes configuration
+install_kubectl: true
+kubectl_version: "1.28.2"
+setup_kubernetes: false  # Set to true to configure Kubernetes context
+kubeconfig_content: ""   # Will be set from GitHub Actions secrets
