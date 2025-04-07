@@ -127,7 +127,6 @@ func (s *Server) setupRoutes() {
 			messages.POST("/like", s.MessageBoardHandler.LikeMessage)
 		}
 
-		// New search endpoints
 		search := api.Group("/search")
 		{
 			search.GET("/messages", s.SearchHandler.SearchMessages)
