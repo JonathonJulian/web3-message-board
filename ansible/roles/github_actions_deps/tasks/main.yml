@@ -299,17 +299,24 @@
       register: k8s_nodes
       changed_when: false
       when: setup_kubernetes | bool
+      ignore_errors: true
 
     - name: Display Kubernetes nodes
       debug:
         var: k8s_nodes.stdout_lines
       when: setup_kubernetes | bool and k8s_nodes.rc == 0
 
+    - name: Display Kubernetes error
+      debug:
+        msg: "Kubernetes connection error: {{ k8s_nodes.stderr | default('Unknown error') }}"
+      when: setup_kubernetes | bool and k8s_nodes.rc != 0
+
     - name: Verify Kubernetes context
       command: kubectl config current-context
       register: k8s_context
       changed_when: false
       when: setup_kubernetes | bool
+      ignore_errors: true
 
     - name: Display current Kubernetes context
       debug:
