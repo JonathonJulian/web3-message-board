@@ -6,20 +6,36 @@
   let switchingNetwork = false;
   let error = '';
 
+  // Function to safely get network name
+  function getNetworkName(key: string): string {
+    // Type guard to check if the key is a valid NetworkKey
+    const isValidKey = (k: string): k is NetworkKey =>
+      Object.keys(NETWORKS).includes(k);
+
+    if (isValidKey(key) && NETWORKS[key]) {
+      return NETWORKS[key].name;
+    }
+    return 'Unknown Network';
+  }
+
   // Handle network switch
-  async function handleNetworkSwitch(network: NetworkKey) {
+  async function handleNetworkSwitch(network: string) {
     if (!$isConnected) return;
 
+    // Type guard for NetworkKey
+    if (!Object.keys(NETWORKS).includes(network)) return;
+
+    const validNetwork = network as NetworkKey;
     switchingNetwork = true;
     error = '';
 
     try {
-      const success = await switchNetwork(network);
+      const success = await switchNetwork(validNetwork);
       if (success) {
-        networkName.set(network);
+        networkName.set(validNetwork);
         isOpen = false;
       } else {
-        error = `Failed to switch to ${NETWORKS[network]?.name || network}`;
+        error = `Failed to switch to ${NETWORKS[validNetwork]?.name || network}`;
       }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -36,7 +52,7 @@
     disabled={!$isConnected || switchingNetwork}
   >
     <span class="inline-block w-2 h-2 rounded-full bg-green-400 mr-1"></span>
-    {NETWORKS[$networkName as NetworkKey]?.name || 'Unknown Network'}
+    {getNetworkName($networkName)}
     <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
     </svg>
@@ -47,7 +63,7 @@
       {#each Object.entries(NETWORKS) as [key, network]}
         <button
           class="w-full text-left px-4 py-2 hover:bg-gray-700 text-sm {$networkName === key ? 'bg-gray-700' : ''}"
-          on:click={() => handleNetworkSwitch(key as NetworkKey)}
+          on:click={() => handleNetworkSwitch(key)}
           disabled={switchingNetwork || $networkName === key}
         >
           <div class="flex items-center">
