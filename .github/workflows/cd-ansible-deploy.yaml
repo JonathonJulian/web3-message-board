@@ -148,8 +148,6 @@ jobs:
             DEPLOYMENT_TYPE="${{ github.event.client_payload.deployment_type }}"
           fi
 
-          EXTRA_VARS=""
-
           # Version tag handling
           # Get version tag from inputs or client payload
           if [ -n "${{ github.event.inputs.version_tag }}" ]; then
@@ -158,25 +156,35 @@ jobs:
             VERSION_TAG="${{ github.event.client_payload.version_tag }}"
           fi
 
+          # Set up version variables with default tag (if available)
           if [ -n "$VERSION_TAG" ]; then
             VERSION_NUMBER="${VERSION_TAG#v}"
             echo "📌 Using version tag: \"$VERSION_TAG\" (\"$VERSION_NUMBER\")"
-            EXTRA_VARS="service_release_version=\"$VERSION_TAG\" api_release_version=\"$VERSION_NUMBER\" frontend_release_version=\"$VERSION_NUMBER\" static_site_release_version=\"$VERSION_TAG\""
+            # Set default versions for all components
+            API_VERSION="$VERSION_TAG"
+            FRONTEND_VERSION="$VERSION_TAG"
           fi
 
-          # Additional component-specific version handling for repository_dispatch
+          # Handle component-specific version overrides from repository dispatch
           if [ -n "${{ github.event.client_payload.api_version }}" ]; then
             API_VERSION="${{ github.event.client_payload.api_version }}"
-            API_VERSION_NUMBER="${API_VERSION#v}"
-            echo "📌 Using custom API version: \"$API_VERSION\" (\"$API_VERSION_NUMBER\")"
-            EXTRA_VARS="$EXTRA_VARS api_release_version=\"$API_VERSION_NUMBER\""
+            echo "📌 Using custom API version: \"$API_VERSION\""
           fi
 
           if [ -n "${{ github.event.client_payload.frontend_version }}" ]; then
             FRONTEND_VERSION="${{ github.event.client_payload.frontend_version }}"
+            echo "📌 Using custom Frontend version: \"$FRONTEND_VERSION\""
+          fi
+
+          # Build the final EXTRA_VARS string with all version information
+          EXTRA_VARS=""
+          if [ -n "$VERSION_TAG" ]; then
+            # Extract version numbers (removing 'v' prefix if present)
+            API_VERSION_NUMBER="${API_VERSION#v}"
             FRONTEND_VERSION_NUMBER="${FRONTEND_VERSION#v}"
-            echo "📌 Using custom Frontend version: \"$FRONTEND_VERSION\" (\"$FRONTEND_VERSION_NUMBER\")"
-            EXTRA_VARS="$EXTRA_VARS frontend_release_version=\"$FRONTEND_VERSION_NUMBER\""
+
+            # Build the final extra vars string
+            EXTRA_VARS="service_release_version=\"$API_VERSION\" static_site_release_version=\"$FRONTEND_VERSION\" api_release_version=\"$API_VERSION_NUMBER\" frontend_release_version=\"$FRONTEND_VERSION_NUMBER\""
           fi
 
           # Map deployment_type to Makefile target
