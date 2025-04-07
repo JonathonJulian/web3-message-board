@@ -284,6 +284,5 @@ initJob:
 
       echo "Volume initialization completed successfully!"
 
-# Template configuration - controls which templates are active
 templates:
   pv: true  # Enable PVs for local-storage (required)
