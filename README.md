@@ -430,4 +430,4 @@ make lint-yaml      # Run YAML linting on all files
 - `.github/workflows/`: GitHub Actions workflow files
 - `ansible/`: Ansible playbooks and roles
 - `monitoring/`: Helm charts for monitoring stack
-- `tools/`: Scripts for fixing linting issues
+- `terraform/`: Terraform for provisioning VMs on vSphere
