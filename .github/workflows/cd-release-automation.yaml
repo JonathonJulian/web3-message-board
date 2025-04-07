@@ -374,13 +374,21 @@ jobs:
           name: frontend-bundle
           path: ./artifacts/frontend
 
-      - name: Download Docker artifacts
+      - name: Download Docker API artifacts
         uses: dawidd6/action-download-artifact@v2
         with:
           workflow: cd-docker-build.yaml
           workflow_conclusion: success
-          search_artifacts: true
-          path: ./artifacts/docker-builds
+          name: docker-build-api
+          path: ./artifacts/docker-builds/api
+
+      - name: Download Docker Frontend artifacts
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: cd-docker-build.yaml
+          workflow_conclusion: success
+          name: docker-build-frontend
+          path: ./artifacts/docker-builds/frontend
 
       - name: Verify all artifacts were downloaded successfully
         run: |
@@ -412,8 +420,6 @@ jobs:
           else
             echo "✅ Found $DOCKER_FILES Docker artifact files"
           fi
-
-          echo "All required artifacts were successfully downloaded"
 
       - name: List downloaded artifacts
         run: |
