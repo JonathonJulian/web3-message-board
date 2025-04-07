@@ -13,11 +13,12 @@ const MessageBoardABI = [
 export const CONTRACT_ADDRESS = '0xd0139AD9718a6C634Ebf0b21f75dE5BD2936035E'; // Updated contract address on Nomad
 
 // RPC URLs
-const NOMAD_RPC_URL = 'https://arbitrum-sepolia.infura.io/v3/95267af4ac9947e488119d2052311552';
-const LOCAL_RPC_URL = 'http://localhost:8080';  // Fallback for local development
+export const NOMAD_RPC_URL = 'https://arbitrum-sepolia.infura.io/v3/95267af4ac9947e488119d2052311552';
+// Fallback for local development - keep as reference for debugging
+// const LOCAL_RPC_URL = 'http://localhost:8080';
 
-// Use Nomad by default, fallback to local server in development if needed
-const RPC_URL = NOMAD_RPC_URL;
+// Use Nomad by default
+// const RPC_URL = NOMAD_RPC_URL;
 
 // Define if we're in simulation mode
 const IS_SIMULATION_MODE = false; // Set to false since we're using real Nomad
