@@ -7,6 +7,7 @@ run-name: |
     inputs.deployment_type == 'ansible-frontend' && 'Frontend' ||
     inputs.deployment_type == 'ansible-logging' && 'Logging Stack' ||
     inputs.deployment_type == 'ansible-api' && 'API Service' ||
+    inputs.deployment_type == 'ansible-security' && 'Security Settings' ||
     'Unknown Component'
   }}
 
@@ -82,63 +83,50 @@ jobs:
         uses: actions/checkout@v4
 
       # --------------------------------
-      # Setup basic dependencies
+      # Extract host IPs and scan for SSH keys
       # --------------------------------
-      - name: Setup basic dependencies
+      - name: Extract host IPs and scan SSH keys
+        id: scan-hosts
         run: |
-          echo "🔧 Setting up basic Ansible dependencies..."
+          echo "🔍 Extracting host IPs from inventory..."
 
-          # Install Python and Ansible if not present
-          if ! command -v ansible &> /dev/null; then
-            echo "📦 Installing Ansible..."
-            python3 -m pip install --upgrade pip
-            python3 -m pip install ansible
-          fi
+          # Extract all IPs from the inventory file
+          IP_LIST=$(grep -oE "ansible_host=[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" ansible/inventory.ini | cut -d= -f2)
 
-          # Verify Ansible installation
-          echo "✅ Ansible version: $(ansible --version | head -n1)"
+          echo "Found IPs: $IP_LIST"
+          echo "ip_count=$(echo "$IP_LIST" | wc -l)" >> $GITHUB_OUTPUT
 
-      # --------------------------------
-      # Setup SSH authentication
-      # --------------------------------
-      - name: Setup SSH key
-        run: |
-          echo "🔐 Setting up SSH authentication..."
+          # Create a temporary file to store known_hosts entries
+          KNOWN_HOSTS_FILE="known_hosts_entries.txt"
+          > $KNOWN_HOSTS_FILE
 
-          # Create SSH directory if it doesn't exist
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
+          # Scan SSH keys for each IP
+          echo "🔑 Scanning SSH keys for hosts..."
+          for IP in $IP_LIST; do
+            echo "  → Scanning $IP"
+            ssh-keyscan -H "$IP" >> $KNOWN_HOSTS_FILE
+          done
 
-          # Write the SSH private key
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
+          KNOWN_HOSTS=$(cat $KNOWN_HOSTS_FILE)
+          echo "known_hosts<<EOF" >> $GITHUB_OUTPUT
+          echo "$KNOWN_HOSTS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
-          # Extract hosts from inventory file and add to known_hosts
-          echo "🔄 Adding inventory hosts to known_hosts..."
-
-          # Use the ansible_host IP instead of trying to resolve the hostname
-          HOSTS_WITH_IP=$(grep -E "ansible_host=[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" ansible/inventory.ini | grep -v "^#")
-          HOSTS_COUNT=0
-
-          echo "Hosts found with IP addresses:"
-          echo "$HOSTS_WITH_IP"
-
-          while read -r host_line; do
-            # Extract IP address
-            IP=$(echo "$host_line" | grep -oE "ansible_host=[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | cut -d= -f2)
-            HOSTNAME=$(echo "$host_line" | awk '{print $1}')
-
-            if [ -n "$IP" ]; then
-              echo "  → Adding \"$HOSTNAME\" ($IP) to known_hosts"
-              ssh-keyscan -H "$IP" >> ~/.ssh/known_hosts
-              HOSTS_COUNT=$((HOSTS_COUNT+1))
-            fi
-          done <<< "$HOSTS_WITH_IP"
-
-          echo "✅ Added \"$HOSTS_COUNT\" hosts to known_hosts"
+          echo "✅ Scanned SSH keys for $(echo "$IP_LIST" | wc -l) hosts"
 
       # --------------------------------
-      # Run the Ansible deployment
+      # Setup SSH authentication using action
+      # --------------------------------
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          name: id_ed25519
+          known_hosts: ${{ steps.scan-hosts.outputs.known_hosts }}
+          if_key_exists: replace
+
+      # --------------------------------
+      # Run the Ansible deployment using Makefile
       # --------------------------------
       - name: Run Ansible deployment
         env:
@@ -147,15 +135,9 @@ jobs:
         run: |
           echo "🚀 Starting Ansible deployment..."
 
-          # Install Ansible dependencies if not already done
-          if [ ! -f ".ansible_deps_installed" ]; then
-            echo "📦 Installing Ansible dependencies..."
-            cd ansible
-            ansible-galaxy collection install -r requirements.yaml
-            pip install -r requirements.txt
-            cd ..
-            touch .ansible_deps_installed
-          fi
+          # First, install Ansible dependencies using Makefile target
+          echo "📦 Installing Ansible dependencies..."
+          make ansible-deps
 
           # Set up deployment variables
           # Get deployment type from inputs or client payload
@@ -196,44 +178,58 @@ jobs:
             EXTRA_VARS="$EXTRA_VARS frontend_release_version=\"$FRONTEND_VERSION_NUMBER\""
           fi
 
-          # Build the tags parameter based on deployment type
-          # Extract clean tag name from deployment type (remove "ansible-" prefix)
-          if [ "$DEPLOYMENT_TYPE" = "ansible-deploy" ]; then
-            # Full deployment doesn't use tags
-            TAG_PARAM=""
-            COMPONENT="Full infrastructure"
-          else
-            # Extract the tag name from input (everything after "ansible-")
-            TAG_NAME="${DEPLOYMENT_TYPE#ansible-}"
+          # Map deployment_type to Makefile target
+          MAKE_TARGET=""
+          case "$DEPLOYMENT_TYPE" in
+            ansible-deploy)
+              MAKE_TARGET="ansible-deploy"
+              COMPONENT="Full infrastructure"
+              ;;
+            ansible-api)
+              MAKE_TARGET="ansible-api"
+              COMPONENT="API service"
+              ;;
+            ansible-frontend)
+              MAKE_TARGET="ansible-frontend"
+              COMPONENT="Frontend application"
+              ;;
+            ansible-nginx)
+              MAKE_TARGET="ansible-nginx"
+              COMPONENT="Nginx"
+              ;;
+            ansible-logging)
+              MAKE_TARGET="ansible-logging"
+              COMPONENT="Logging stack"
+              ;;
+            ansible-security)
+              MAKE_TARGET="ansible-security"
+              COMPONENT="Security settings"
+              ;;
+            *)
+              echo "❌ Unknown deployment type: $DEPLOYMENT_TYPE"
+              exit 1
+              ;;
+          esac
 
-            # Special case for security which needs multiple tags
-            if [ "$TAG_NAME" = "security" ]; then
-              TAG_PARAM="--tags security,users,firewall,ssh"
-            else
-              TAG_PARAM="--tags ${TAG_NAME}"
-            fi
+          echo "🎯 Deploying component: \"$COMPONENT\" with Makefile target: \"$MAKE_TARGET\""
 
-            # Set component name based on the tag
-            case "$TAG_NAME" in
-              api)         COMPONENT="API service" ;;
-              frontend)    COMPONENT="Frontend application" ;;
-              nginx)       COMPONENT="Nginx" ;;
-              logging)     COMPONENT="Logging stack" ;;
-              security)    COMPONENT="Security settings" ;;
-              *)           COMPONENT="$TAG_NAME" ;;
-            esac
-          fi
-
-          echo "🎯 Deploying component: \"$COMPONENT\""
-
-          # Set up additional extra vars and run the deployment
+          # Set up all extra vars including GitHub token
           ALL_EXTRA_VARS="github_token=\"$GITHUB_TOKEN\" ansible_user=ubuntu $EXTRA_VARS"
 
-          echo "🔧 Running make \"$DEPLOYMENT_TYPE\" with the following parameters:"
+          echo "🔧 Running make \"$MAKE_TARGET\" with extra vars"
           echo "   → Extra vars: github_token=*** ${EXTRA_VARS}"
-          echo "   → Tags: ${TAG_PARAM}"
 
-          make "$DEPLOYMENT_TYPE" ANSIBLE_EXTRA_VARS="$ALL_EXTRA_VARS"
+          # Run the deployment using the Makefile target
+          set -x  # Print commands as they execute
+          make "$MAKE_TARGET" ANSIBLE_EXTRA_VARS="$ALL_EXTRA_VARS"
+          MAKE_EXIT_CODE=$?
+          set +x  # Disable command printing
+
+          if [ $MAKE_EXIT_CODE -ne 0 ]; then
+            echo "❌ Deployment failed with exit code $MAKE_EXIT_CODE"
+            echo "::error::Deployment failed with exit code $MAKE_EXIT_CODE"
+            exit $MAKE_EXIT_CODE
+          fi
 
           echo "✅ Deployment completed successfully"
 

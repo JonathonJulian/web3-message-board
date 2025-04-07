@@ -1,7 +1,7 @@
 # Makefile for managing infrastructure, helm deployments, and configuration
 # Variables
-ANSIBLE_INVENTORY ?= ansible-playbook/inventory.ini
-ANSIBLE_VAULT_PASS ?= ansible-playbook/.vault_pass
+ANSIBLE_INVENTORY ?= ansible/inventory.ini
+ANSIBLE_VAULT_PASS ?= ansible/.vault_pass
 HELM_NAMESPACE ?= monad
 VM_NAME ?= web-server-nginx-cloud-5
 KUBERNETES_CONTEXT ?= k3s-main
