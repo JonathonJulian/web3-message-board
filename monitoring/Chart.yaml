@@ -1,6 +1,6 @@
 ---
 apiVersion: v2
-name: monad-monitoring
+name: web3-monitoring
 description: A Helm chart for Loki and Grafana logging stack
 type: application
 version: 0.1.0

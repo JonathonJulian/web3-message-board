@@ -61,7 +61,7 @@ logs:
 # Kubernetes Ingress Host Entries
 k8s_ingress:
   default_ip: "192.168.1.77"
-  namespace: "monad"
+  namespace: "web3"
   resource_name: "monitoring-minio"
   host_entries:
     - hostname: "grafana.local"

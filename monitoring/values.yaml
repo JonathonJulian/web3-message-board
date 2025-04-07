@@ -89,7 +89,7 @@ loki-stack:
             isDefault: true
           - name: Prometheus
             type: prometheus
-            url: http://prometheus-server.monitoring.svc.cluster.local:80
+            url: http://prometheus-server.web3.svc.cluster.local:80
             access: proxy
             isDefault: false
 
