@@ -3,11 +3,7 @@
 lokiStack:
   enabled: true  # Enable the loki-stack chart
 
-# Configure Prometheus (disabled for now)
-prometheus:
-  enabled: false
-
-# Configure Prometheus
+# Configure Prometheus (enabled)
 prometheus:
   enabled: true  # Enable Prometheus
 
@@ -21,6 +17,13 @@ prometheus:
     # Add nodeSelector to target worker0
     nodeSelector:
       kubernetes.io/hostname: worker0
+
+    # Fix permission issues
+    securityContext:
+      runAsUser: 65534
+      runAsNonRoot: true
+      runAsGroup: 65534
+      fsGroup: 65534
 
   # Add service monitor for monitoring Kubernetes components
   kubeStateMetrics:
@@ -37,6 +40,17 @@ prometheus:
       enabled: true
       size: 10Gi
       storageClass: local-storage
+
+    # Add nodeSelector to target worker0
+    nodeSelector:
+      kubernetes.io/hostname: worker0
+
+    # Fix permission issues
+    securityContext:
+      runAsUser: 65534
+      runAsNonRoot: true
+      runAsGroup: 65534
+      fsGroup: 65534
 
   # Ingress for Prometheus UI
   ingress:
@@ -228,6 +242,47 @@ initJob:
   enabled: true
   image: "busybox:latest"
   imagePullPolicy: "IfNotPresent"
+
+  # Commands to run for initializing volumes
+  args:
+    - |
+      # Create Minio directory with appropriate permissions
+      mkdir -p /storage/minio
+      chmod -R 777 /storage/minio
+
+      # Create Loki directories with appropriate permissions
+      # Main directories
+      mkdir -p /storage/loki/write
+      mkdir -p /storage/loki/backend
+
+      # Create subdirectories that Loki expects
+      mkdir -p /storage/loki/write/data/loki
+      mkdir -p /storage/loki/write/data/loki/boltdb-shipper-active
+      mkdir -p /storage/loki/write/data/loki/boltdb-shipper-cache
+      mkdir -p /storage/loki/write/data/loki/chunks
+      mkdir -p /storage/loki/write/data/loki/index
+
+      # Setting very permissive permissions to avoid issues
+      chmod -R 777 /storage/loki
+
+      # Create Grafana directory with appropriate permissions
+      mkdir -p /storage/grafana
+      # Grafana runs as user 472
+      chmod -R 777 /storage/grafana
+
+      # Create Prometheus directories with appropriate permissions
+      mkdir -p /storage/prometheus
+      # Prometheus runs as nobody (UID 65534)
+      chown -R 65534:65534 /storage/prometheus
+      chmod -R 755 /storage/prometheus
+
+      # Create AlertManager directories with appropriate permissions
+      mkdir -p /storage/alertmanager
+      # AlertManager also runs as nobody (UID 65534)
+      chown -R 65534:65534 /storage/alertmanager
+      chmod -R 755 /storage/alertmanager
+
+      echo "Volume initialization completed successfully!"
 
 # Template configuration - controls which templates are active
 templates:

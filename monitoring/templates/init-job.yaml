@@ -31,33 +31,16 @@ spec:
           image: {{.Values.initJob.image | default "busybox:latest"}}
           imagePullPolicy: {{.Values.initJob.imagePullPolicy | default "IfNotPresent"}}
           command: ["/bin/sh", "-c"]
+          {{- if .Values.initJob.args }}
+          args:
+{{ toYaml .Values.initJob.args | indent 12 }}
+          {{- else }}
           args:
             - |
-              # Create Minio directory with appropriate permissions
-              mkdir -p /storage/minio
-              chmod -R 777 /storage/minio
-
-              # Create Loki directories with appropriate permissions
-              # Main directories
-              mkdir -p /storage/loki/write
-              mkdir -p /storage/loki/backend
-
-              # Create subdirectories that Loki expects
-              mkdir -p /storage/loki/write/data/loki
-              mkdir -p /storage/loki/write/data/loki/boltdb-shipper-active
-              mkdir -p /storage/loki/write/data/loki/boltdb-shipper-cache
-              mkdir -p /storage/loki/write/data/loki/chunks
-              mkdir -p /storage/loki/write/data/loki/index
-
-              # Setting very permissive permissions to avoid issues
-              chmod -R 777 /storage/loki
-
-              # Create Grafana directory with appropriate permissions
-              mkdir -p /storage/grafana
-              # Grafana runs as user 472
-              chmod -R 777 /storage/grafana
-
-              echo "Volume initialization completed successfully!"
+              echo "No initialization commands specified in values.yaml"
+              mkdir -p /storage
+              chmod -R 777 /storage
+          {{- end }}
           volumeMounts:
             - name: storage
               mountPath: /storage
