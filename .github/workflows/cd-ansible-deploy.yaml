@@ -132,6 +132,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANSIBLE_HOST_KEY_CHECKING: "false"
+          USE_SIMPLIFIED_SETUP: "true"
         run: |
           echo "🚀 Starting Ansible deployment..."
 

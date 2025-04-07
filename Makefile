@@ -218,7 +218,14 @@ ansible-deps:
 		fi; \
 	else \
 		echo "Setting up Ansible environment..."; \
-		$(MAKE) github-runner-setup; \
+		if [ -n "$$USE_SIMPLIFIED_SETUP" ]; then \
+			echo "Using simplified setup (skipping full runner setup)..."; \
+			python3 -m venv .ansible_venv; \
+			. .ansible_venv/bin/activate && pip install ansible kubernetes>=24.2.0 PyYAML>=6.0; \
+			touch .ansible_deps_installed; \
+		else \
+			$(MAKE) github-runner-setup; \
+		fi; \
 	fi
 
 .PHONY: ansible-deploy
@@ -424,7 +431,7 @@ github-runner-setup:
 	@echo "[github_runners]" > /tmp/github_runner_inventory.ini
 	@echo "localhost ansible_connection=local" >> /tmp/github_runner_inventory.ini
 	# Run the Ansible playbook locally with current directory as project root
-	ansible-playbook ansible/github_actions_setup.yml -i /tmp/github_runner_inventory.ini -e "project_root=$(shell pwd)"
+	ansible-playbook ansible/runner.yaml -i /tmp/github_runner_inventory.ini -e "project_root=$(shell pwd)"
 	@echo ""
 	@echo "Setup completed successfully!"
 	@if [ -f "activate_ansible_env.sh" ]; then \
