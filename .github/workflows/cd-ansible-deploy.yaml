@@ -115,16 +115,25 @@ jobs:
 
           # Extract hosts from inventory file and add to known_hosts
           echo "🔄 Adding inventory hosts to known_hosts..."
-          HOSTS=$(grep -v "^\[" ansible/inventory.ini | grep -v "^#" | grep -v "^$" | awk '{print $1}')
+
+          # Use the ansible_host IP instead of trying to resolve the hostname
+          HOSTS_WITH_IP=$(grep -E "ansible_host=[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" ansible/inventory.ini | grep -v "^#")
           HOSTS_COUNT=0
 
-          for HOST in $HOSTS; do
-            if [[ "$HOST" != *"="* ]]; then
-              echo "  → Adding \"$HOST\" to known_hosts"
-              ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+          echo "Hosts found with IP addresses:"
+          echo "$HOSTS_WITH_IP"
+
+          while read -r host_line; do
+            # Extract IP address
+            IP=$(echo "$host_line" | grep -oE "ansible_host=[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | cut -d= -f2)
+            HOSTNAME=$(echo "$host_line" | awk '{print $1}')
+
+            if [ -n "$IP" ]; then
+              echo "  → Adding \"$HOSTNAME\" ($IP) to known_hosts"
+              ssh-keyscan -H "$IP" >> ~/.ssh/known_hosts
               HOSTS_COUNT=$((HOSTS_COUNT+1))
             fi
-          done
+          done <<< "$HOSTS_WITH_IP"
 
           echo "✅ Added \"$HOSTS_COUNT\" hosts to known_hosts"
 
