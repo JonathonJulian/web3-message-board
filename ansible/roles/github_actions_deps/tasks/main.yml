@@ -257,3 +257,62 @@
     path: "{{ project_root | default(ansible_env.PWD) }}/.ansible_deps_installed"
     state: touch
     mode: '0644'
+
+# Kubernetes setup tasks
+- name: Set up Kubernetes tools and configuration
+  block:
+    - name: Install kubectl
+      block:
+        - name: Download kubectl binary
+          get_url:
+            url: "https://dl.k8s.io/release/v{{ kubectl_version }}/bin/linux/amd64/kubectl"
+            dest: "/tmp/kubectl"
+            mode: '0755'
+          when: ansible_system == "Linux" and ansible_architecture == "x86_64" and not is_macos | bool
+
+        - name: Move kubectl binary to path
+          copy:
+            src: "/tmp/kubectl"
+            dest: "/usr/local/bin/kubectl"
+            mode: '0755'
+            remote_src: yes
+          become: true
+          when: ansible_system == "Linux" and ansible_architecture == "x86_64" and not is_macos | bool and sudo_access.rc == 0
+      when: install_kubectl | bool and not is_macos | bool and sudo_access.rc == 0
+
+    - name: Create .kube directory if it doesn't exist
+      file:
+        path: "{{ ansible_env.HOME }}/.kube"
+        state: directory
+        mode: '0700'
+      when: setup_kubernetes | bool
+
+    - name: Set up kubeconfig from content
+      copy:
+        content: "{{ kubeconfig_content }}"
+        dest: "{{ ansible_env.HOME }}/.kube/config"
+        mode: '0600'
+      when: setup_kubernetes | bool and kubeconfig_content | length > 0
+
+    - name: Verify Kubernetes connection
+      command: kubectl get nodes
+      register: k8s_nodes
+      changed_when: false
+      when: setup_kubernetes | bool
+
+    - name: Display Kubernetes nodes
+      debug:
+        var: k8s_nodes.stdout_lines
+      when: setup_kubernetes | bool and k8s_nodes.rc == 0
+
+    - name: Verify Kubernetes context
+      command: kubectl config current-context
+      register: k8s_context
+      changed_when: false
+      when: setup_kubernetes | bool
+
+    - name: Display current Kubernetes context
+      debug:
+        var: k8s_context.stdout
+      when: setup_kubernetes | bool and k8s_context.rc == 0
+  when: install_kubectl | bool or setup_kubernetes | bool
