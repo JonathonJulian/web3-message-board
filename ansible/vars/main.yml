@@ -31,7 +31,8 @@ firewall_rules:
     comment: "HTTP"
 
 # Logging settings
-loki_url: "http://grafana.local/loki/loki/api/v1/push"
+logging_agent: alloy
+loki_url: "http://grafana.local/loki-push"
 logs:
   - name: nginx-access
     path: /var/log/nginx/access.log
@@ -90,7 +91,7 @@ users:
     sudoers:
       privileges: "ALL=(ALL) NOPASSWD:ALL"
     ssh_key:
-      key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDrV6JpZ+TZOwVf/+tLKBwHaNrWnI00eHiKCI2tJ+6sp github-actions@monad"
+      key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDrV6JpZ+TZOwVf/+tLKBwHaNrWnI00eHiKCI2tJ+6sp github-actions@web3"
       state: present
   - name: bob
     groups: users
@@ -107,8 +108,8 @@ service_github_repo: "JonathonJulian/web3-message-board"
 service_release_version: "v0.1.5-beta.1"
 service_env_vars:
   PORT: "8080"
-  MONAD_CONTRACT_ADDRESS: "0xEFD38108dfE2c80f29579E6D692c4009586A3f59"
-  MONAD_RPC_URL: "https://testnet-rpc.monad.xyz"
+  WEB3_CONTRACT_ADDRESS: "0xEFD38108dfE2c80f29579E6D692c4009586A3f59"
+  WEB3_RPC_URL: "https://testnet-rpc.monad.xyz"
 
 # Static site configuration
 static_site_name: "frontend"

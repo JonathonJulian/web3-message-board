@@ -75,6 +75,77 @@ loki-stack:
     # Add tolerations to ensure it doesn't run on control plane
     tolerations: []
 
+    # Configure Loki's built-in ingress
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /loki/api/v1/push
+        nginx.ingress.kubernetes.io/use-regex: "true"
+        nginx.ingress.kubernetes.io/proxy-body-size: "500m"
+        nginx.ingress.kubernetes.io/proxy-connect-timeout: "300"
+        nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+        nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+      hosts:
+        - host: grafana.local
+          paths:
+            - /loki-push
+
+    # Optimize Loki for faster indexing and use MinIO for storage
+    config:
+      schema_config:
+        configs:
+          - from: "2020-10-24"
+            store: boltdb-shipper
+            object_store: s3
+            schema: v11
+            index:
+              prefix: loki_index_
+              period: 24h
+      storage_config:
+        boltdb_shipper:
+          active_index_directory: /data/loki/index
+          shared_store: s3
+          cache_location: /data/loki/boltdb-shipper-cache
+          cache_ttl: 24h # Increase cache TTL to improve query performance
+        aws:
+          s3: s3://minioadmin:minioadmin@monitoring-minio.web3.svc.cluster.local:9000/loki-chunks
+          s3forcepathstyle: true
+          bucketnames: loki-chunks
+          endpoint: monitoring-minio.web3.svc.cluster.local:9000
+          access_key_id: minioadmin
+          secret_access_key: minioadmin
+          insecure: true
+      chunk_store_config:
+        max_look_back_period: 0s # Disable lookback period to index everything
+      table_manager:
+        retention_deletes_enabled: false
+        retention_period: 0s
+      limits_config:
+        ingestion_rate_mb: 10  # Increase ingestion rate (default is 4MB)
+        ingestion_burst_size_mb: 20  # Increase burst size (default is 6MB)
+        max_global_streams_per_user: 10000  # Increase max streams
+        reject_old_samples: true
+        reject_old_samples_max_age: 168h
+        max_entries_limit_per_query: 10000
+      ingester:
+        chunk_idle_period: 1m  # Reduced from 3m
+        chunk_block_size: 262144
+        chunk_retain_period: 30s  # Reduced from 1m
+        lifecycler:
+          ring:
+            kvstore:
+              store: inmemory
+            replication_factor: 1
+      frontend_worker:
+        parallelism: 2  # Increase query parallelism
+
+    env:
+      - name: AWS_ACCESS_KEY_ID
+        value: minioadmin
+      - name: AWS_SECRET_ACCESS_KEY
+        value: minioadmin
+
     # Add affinity to prefer worker nodes
     affinity:
       nodeAffinity:
@@ -121,7 +192,7 @@ loki-stack:
 
     # Default admin credentials
     adminUser: admin
-    adminPassword: monad-admin-pw
+    adminPassword: web3-admin-pw
 
     # Let our manual PVC handle persistence
     persistence:

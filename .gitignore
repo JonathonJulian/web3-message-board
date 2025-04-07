@@ -71,3 +71,7 @@ terraform/state-backups/
 node_modules/
 
 .ansible_venv/
+
+# Helm charts
+monitoring/charts/
+*.tgz
