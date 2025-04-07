@@ -1,444 +1,590 @@
----
 name: Release Automation
-run-name: ${{ github.event.inputs.release_type || 'Auto' }} Release ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || '(version to be determined)' }}
+run-name: Release Process ${{ github.event.inputs.release_type != '' && format('({0})', github.event.inputs.release_type) || '(auto)' }}
 
-on:
-  push:
-    branches: [main]
-  repository_dispatch:
-    types: [docker-build-complete]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to release (e.g. 1.0.0)"
-        required: false
-        type: string
-      release_type:
-        description: "Type of release"
-        type: choice
-        options:
-          - Major
-          - Minor
-          - Patch
-        default: "Patch"
-        required: true
-      create_github_release:
-        description: "Create GitHub Release"
-        type: boolean
-        default: true
-      deploy_artifacts:
-        description: "Deploy artifacts"
-        type: boolean
-        default: true
-      build_docker:
-        description: "Build Docker images"
-        type: boolean
-        default: true
-      build_arm:
-        description: "Build ARM64 architecture"
-        type: boolean
-        default: false
-
-# Add explicit write permissions
 permissions:
   contents: write
   pull-requests: write
-  discussions: write
+  issues: write
   actions: write
 
+on:
+  push:
+    branches: [main, test/release-automation]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Force release type (patch|minor|major)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
 jobs:
-  # Analyze commits to determine version bump type
   analyze-commits:
     runs-on: ubuntu-latest
     outputs:
-      release_type: ${{ steps.determine_type.outputs.release_type }}
-      has_new_commits: ${{ steps.check_commits.outputs.has_new_commits }}
-    if: github.event_name == 'push'
+      release_type: ${{ steps.analyze.outputs.release_type }}
+      has_new_commits: ${{ steps.analyze.outputs.has_new_commits }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ github.token }}
 
-      - name: Check for new commits
-        id: check_commits
+      - name: Debug existing tags
+        run: |
+          echo "Existing tags in the repository:"
+          git tag -l
+          echo "--------------------------"
+          git tag -l | sort -V
+          echo "--------------------------"
+          echo "Latest tag:"
+          git describe --tags --abbrev=0 2>/dev/null || echo "No tags found"
+
+      - name: Analyze commits for release type
+        id: analyze
         run: |
           # Get the latest tag
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "Latest tag: $LATEST_TAG"
 
-          # Get commit count since the latest tag
-          COMMIT_COUNT=$(git rev-list --count $LATEST_TAG..HEAD)
-          echo "Found $COMMIT_COUNT new commits since $LATEST_TAG"
-
-          # Set output based on commit count
-          if [ "$COMMIT_COUNT" -gt 0 ]; then
-            echo "has_new_commits=true" >> $GITHUB_OUTPUT
-            echo "Found new commits. Will proceed with release."
-          else
-            echo "has_new_commits=false" >> $GITHUB_OUTPUT
-            echo "No new commits found. Will skip release."
-          fi
-
-      - name: Determine release type from commits
-        id: determine_type
-        if: steps.check_commits.outputs.has_new_commits == 'true'
-        run: |
-          # Get the latest tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-
           # Get commit messages since the latest tag
           COMMITS=$(git log --pretty=format:"%s" $LATEST_TAG..HEAD)
+          COMMIT_COUNT=$(echo "$COMMITS" | grep -v "^$" | wc -l | xargs)
+          echo "Found $COMMIT_COUNT new commits since $LATEST_TAG"
+
+          echo "Commit messages since last tag:"
+          git log --pretty=format:"%h - %s" $LATEST_TAG..HEAD
+
+          if [ "$COMMIT_COUNT" -eq 0 ] && [ "${{ github.event.inputs.release_type }}" == "" ]; then
+            echo "No new commits found and no manual release type specified"
+            echo "has_new_commits=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check if any changes were made to API or frontend
+          API_CHANGES=$(git diff --name-only $LATEST_TAG..HEAD -- api/ | wc -l | xargs)
+          FRONTEND_CHANGES=$(git diff --name-only $LATEST_TAG..HEAD -- frontend/ | wc -l | xargs)
+
+          echo "API changes: $API_CHANGES"
+          echo "Frontend changes: $FRONTEND_CHANGES"
+
+          # If no changes to API or frontend, skip the release (unless manually triggered)
+          if [ "$API_CHANGES" -eq 0 ] && [ "$FRONTEND_CHANGES" -eq 0 ] && [ "${{ github.event.inputs.release_type }}" == "" ]; then
+            echo "No changes to API or frontend, skipping release"
+            echo "has_new_commits=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "has_new_commits=true" >> $GITHUB_OUTPUT
+
+          # If manual release type was specified, use that
+          if [ "${{ github.event.inputs.release_type }}" != "" ]; then
+            echo "Using manually specified release type: ${{ github.event.inputs.release_type }}"
+            echo "release_type=${{ github.event.inputs.release_type }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
 
           # Check for breaking changes
-          if echo "$COMMITS" | grep -q -i "BREAKING CHANGE:" || echo "$COMMITS" | grep -q -i "^break:" || echo "$COMMITS" | grep -q -i "^breaking:"; then
-            echo "Found breaking changes - this is a MAJOR release"
+          if echo "$COMMITS" | grep -q -i "BREAKING CHANGE:" || echo "$COMMITS" | grep -q -i "^break: " || echo "$COMMITS" | grep -q -i "^breaking: "; then
+            echo "Major release detected due to breaking changes"
             echo "release_type=major" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           # Check for features
-          if echo "$COMMITS" | grep -q -i "^feat:" || echo "$COMMITS" | grep -q -i "^feature:"; then
-            echo "Found new features - this is a MINOR release"
+          if echo "$COMMITS" | grep -q -i "^feat: " || echo "$COMMITS" | grep -q -i "^feature: "; then
+            echo "Minor release detected due to new features"
             echo "release_type=minor" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           # Default to patch
-          echo "No breaking changes or features found - this is a PATCH release"
+          echo "Patch release detected (default for bug fixes, docs, etc.)"
           echo "release_type=patch" >> $GITHUB_OUTPUT
 
-  # Determine and bump the version
-  determine-version:
-    runs-on: ubuntu-latest
-    needs: [analyze-commits]
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && needs.analyze-commits.outputs.has_new_commits == 'true')
-    outputs:
-      version: ${{ steps.set_version.outputs.version }}
-      tag: ${{ steps.set_version.outputs.tag }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ github.token }}
-
-      # If version is provided directly via input, use it
-      - name: Set manual version
-        id: manual_version
-        if: github.event.inputs.version != ''
+      - name: Generate analysis summary
+        if: steps.analyze.outputs.has_new_commits == 'true'
         run: |
-          VERSION="${{ github.event.inputs.version }}"
-          # Validate version format
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Error: Version must follow semantic versioning (X.Y.Z)"
-            exit 1
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
-
-      # Calculate version bump based on commit analysis
-      - name: Calculate version bump
-        id: calculate_version
-        if: github.event.inputs.version == ''
-        run: |
-          # Get the latest tag
+          # Extract some example commits to display
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "Latest tag: $LATEST_TAG"
+          COMMIT_EXAMPLES=$(git log --pretty=format:"- %h %s" $LATEST_TAG..HEAD | head -5)
+          COMMIT_COUNT=$(git log --pretty=format:"%h" $LATEST_TAG..HEAD | wc -l | xargs)
 
-          # Remove 'v' prefix if present
-          CURRENT_VERSION=${LATEST_TAG#v}
-          echo "Current version: $CURRENT_VERSION"
+          # Count changes in each component
+          API_CHANGES=$(git diff --name-only $LATEST_TAG..HEAD -- api/ | wc -l | xargs)
+          FRONTEND_CHANGES=$(git diff --name-only $LATEST_TAG..HEAD -- frontend/ | wc -l | xargs)
 
-          # Split version into components
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-
-          # Default to manual input for workflow_dispatch or analyzed type for push
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            RELEASE_TYPE="${{ github.event.inputs.release_type }}"
+          # Create summary
+          echo "## 🔍 Commit Analysis Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Release Information" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏷️ **Previous Tag** | $LATEST_TAG |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 **New Commits** | $COMMIT_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🖥️ **API Changes** | $API_CHANGES files |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌐 **Frontend Changes** | $FRONTEND_CHANGES files |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📈 **Release Type** | ${{ steps.analyze.outputs.release_type }} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.release_type }}" != "" ]; then
+            echo "| 🔧 **Bump Mode** | Manual (user specified) |" >> $GITHUB_STEP_SUMMARY
           else
-            RELEASE_TYPE="${{ needs.analyze-commits.outputs.release_type }}"
+            echo "| 🔧 **Bump Mode** | Automatic (based on commit messages) |" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Convert to lowercase
-          RELEASE_TYPE=$(echo "$RELEASE_TYPE" | tr '[:upper:]' '[:lower:]')
-          echo "Using release type: $RELEASE_TYPE"
-
-          # Calculate new version
-          if [ "$RELEASE_TYPE" == "major" ]; then
-            NEW_MAJOR=$((MAJOR + 1))
-            NEW_MINOR=0
-            NEW_PATCH=0
-          elif [ "$RELEASE_TYPE" == "minor" ]; then
-            NEW_MAJOR=$MAJOR
-            NEW_MINOR=$((MINOR + 1))
-            NEW_PATCH=0
-          else
-            NEW_MAJOR=$MAJOR
-            NEW_MINOR=$MINOR
-            NEW_PATCH=$((PATCH + 1))
+          echo "### 📝 Sample Commits" >> $GITHUB_STEP_SUMMARY
+          echo "```" >> $GITHUB_STEP_SUMMARY
+          echo "$COMMIT_EXAMPLES" >> $GITHUB_STEP_SUMMARY
+          if [ "$COMMIT_COUNT" -gt 5 ]; then
+            echo "... and $(($COMMIT_COUNT - 5)) more" >> $GITHUB_STEP_SUMMARY
           fi
+          echo "```" >> $GITHUB_STEP_SUMMARY
 
-          NEW_VERSION="$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
-          echo "New version: $NEW_VERSION"
-
-          # Set outputs
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
-
-      # Use the correct version output
-      - name: Set final version
-        id: set_version
-        run: |
-          if [ "${{ github.event.inputs.version }}" != "" ]; then
-            echo "Using manually provided version"
-            echo "version=${{ steps.manual_version.outputs.version }}" >> $GITHUB_OUTPUT
-            echo "tag=${{ steps.manual_version.outputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "Using calculated version"
-            echo "version=${{ steps.calculate_version.outputs.version }}" >> $GITHUB_OUTPUT
-            echo "tag=${{ steps.calculate_version.outputs.tag }}" >> $GITHUB_OUTPUT
-          fi
-
-          echo "Final version: $(cat $GITHUB_OUTPUT | grep version | cut -d= -f2)"
-          echo "Final tag: $(cat $GITHUB_OUTPUT | grep tag | cut -d= -f2)"
-
-  # Prepare the release
-  prepare:
-    name: Prepare Release
-    needs: [determine-version]
+  bump-version:
+    needs: analyze-commits
+    if: needs.analyze-commits.outputs.has_new_commits == 'true'
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ needs.determine-version.outputs.version }}
-      tag: ${{ needs.determine-version.outputs.tag }}
-      actor: ${{ github.actor }}
+      new_version: ${{ steps.semver-bump.outputs.new_version }}
+      new_tag: ${{ steps.semver-bump.outputs.new_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Bump version and push tag
+        id: semver-bump
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: ${{ needs.analyze-commits.outputs.release_type }}
+          release_branches: main
+          tag_prefix: v
+
+      - name: Display created version
+        run: |
+          echo "::notice::🏷️ Created new version tag: ${{ steps.semver-bump.outputs.new_tag }}"
+          echo "::notice::📦 Version: ${{ steps.semver-bump.outputs.new_version }}"
+          echo "::notice::📋 Type: ${{ needs.analyze-commits.outputs.release_type }}"
+
+      - name: Generate version bump summary
+        run: |
+          echo "## 🏷️ Version Bump Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔖 **New Tag** | ${{ steps.semver-bump.outputs.new_tag }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📊 **Version** | ${{ steps.semver-bump.outputs.new_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📈 **Bump Type** | ${{ needs.analyze-commits.outputs.release_type }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔙 **Previous Tag** | ${{ steps.semver-bump.outputs.previous_tag || 'None' }} |" >> $GITHUB_STEP_SUMMARY
+
+          echo "### 🔄 Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Tag created and pushed to the repository" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Component builds will be triggered automatically" >> $GITHUB_STEP_SUMMARY
+          echo "✅ A GitHub release will be created when builds complete" >> $GITHUB_STEP_SUMMARY
+
+  trigger-builds:
+    name: Trigger Component Builds
+    needs: [bump-version]
+    if: needs.analyze-commits.outputs.has_new_commits == 'true'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ github.token }}
-
-      - name: Show version information
-        run: |
-          echo "Preparing release version: ${{ needs.determine-version.outputs.version }}"
-          echo "Release tag: ${{ needs.determine-version.outputs.tag }}"
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create release branch
-        id: create-branch
-        uses: peterjgrainger/action-create-branch@v2.2.0
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          branch: "release/v${{ needs.determine-version.outputs.version }}"
-
-      - name: Checkout release branch
-        uses: actions/checkout@v4
-        with:
-          ref: "release/v${{ needs.determine-version.outputs.version }}"
-
-      - name: Update version in package files
         run: |
-          VERSION="${{ needs.determine-version.outputs.version }}"
+          # Create and checkout release branch
+          git checkout -b release/v${{ needs.bump-version.outputs.new_version }}
 
-          # Update frontend package.json if it exists
+          # Update package.json files with new version
           if [ -f "frontend/package.json" ]; then
-            echo "Updating frontend/package.json"
-            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" frontend/package.json
+            echo "Updating frontend/package.json to version ${{ needs.bump-version.outputs.new_version }}"
+            sed -i "s/\"version\": \".*\"/\"version\": \"${{ needs.bump-version.outputs.new_version }}\"/" frontend/package.json
             git add frontend/package.json
           fi
 
-          # Update API package.json if it exists
           if [ -f "api/package.json" ]; then
-            echo "Updating api/package.json"
-            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" api/package.json
+            echo "Updating api/package.json to version ${{ needs.bump-version.outputs.new_version }}"
+            sed -i "s/\"version\": \".*\"/\"version\": \"${{ needs.bump-version.outputs.new_version }}\"/" api/package.json
             git add api/package.json
           fi
 
-          # Update root package.json if it exists
-          if [ -f "package.json" ]; then
-            echo "Updating root package.json"
-            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
-            git add package.json
-          fi
-
-          # Commit changes
+          # Commit and push changes
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          git commit -m "chore: bump version to $VERSION" || echo "No changes to commit"
-          git push origin "release/v$VERSION"
+          git commit -m "chore: bump version to ${{ needs.bump-version.outputs.new_version }}" || echo "No changes to commit"
+          git push origin release/v${{ needs.bump-version.outputs.new_version }}
 
-      - name: Create release notes
-        run: |
-          # Get the latest tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-
-          # Generate release notes file
-          echo "## Release ${{ needs.determine-version.outputs.tag }}" > release_notes.md
-          echo "" >> release_notes.md
-          echo "### Changes since $LATEST_TAG" >> release_notes.md
-          echo "" >> release_notes.md
-
-          # Get all commits
-          ALL_COMMITS=$(git log --pretty=format:"%s (%h)" $LATEST_TAG..HEAD)
-
-          # Features section
-          echo "#### Features" >> release_notes.md
-          echo "$ALL_COMMITS" | grep -i "^feat" | while read -r line; do
-            echo "* $line" >> release_notes.md
-          done || true
-          echo "" >> release_notes.md
-
-          # Bug fixes section
-          echo "#### Bug Fixes" >> release_notes.md
-          echo "$ALL_COMMITS" | grep -i "^fix" | while read -r line; do
-            echo "* $line" >> release_notes.md
-          done || true
-          echo "" >> release_notes.md
-
-          # Other changes section
-          echo "#### Other Changes" >> release_notes.md
-          echo "$ALL_COMMITS" | grep -v -E "^feat|^fix" | while read -r line; do
-            echo "* $line" >> release_notes.md
-          done || true
-
-          # Show release notes content
-          cat release_notes.md
-
-  # Trigger component builds
-  trigger-builds:
-    name: Trigger Component Builds
-    needs: [prepare, determine-version]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger API Build
+      - name: Trigger API Build for ${{ needs.bump-version.outputs.new_tag }}
         uses: peter-evans/repository-dispatch@v2
         with:
-          token: ${{ github.token }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           event-type: start-api-build
-          client-payload: '{"version": "${{ needs.prepare.outputs.version }}", "actor": "${{ needs.prepare.outputs.actor }}", "create_release": false}'
+          client-payload: '{"version": "${{ needs.bump-version.outputs.new_version }}", "tag": "${{ needs.bump-version.outputs.new_tag }}", "actor": "${{ github.actor }}", "create_release": false}'
 
-      - name: Trigger Frontend Build
+      - name: Trigger Frontend Build for ${{ needs.bump-version.outputs.new_tag }}
         uses: peter-evans/repository-dispatch@v2
         with:
-          token: ${{ github.token }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           event-type: start-frontend-build
-          client-payload: '{"version": "${{ needs.prepare.outputs.version }}", "actor": "${{ needs.prepare.outputs.actor }}", "create_release": false}'
+          client-payload: '{"version": "${{ needs.bump-version.outputs.new_version }}", "tag": "${{ needs.bump-version.outputs.new_tag }}", "actor": "${{ github.actor }}", "create_release": false}'
 
-      - name: Record build information
+      - name: Trigger Docker Build for ${{ needs.bump-version.outputs.new_tag }}
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: start-docker-build
+          client-payload: '{"version": "${{ needs.bump-version.outputs.new_version }}", "tag": "${{ needs.bump-version.outputs.new_tag }}", "actor": "${{ github.actor }}", "create_release": false, "build_arm": false}'
+
+      - name: Generate trigger summary
         run: |
-          echo "API build triggered for version ${{ needs.prepare.outputs.version }}"
-          echo "Frontend build triggered for version ${{ needs.prepare.outputs.version }}"
+          echo "## 🚀 Component Build Triggers" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Triggered Components" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Version | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🖥️ **API** | ${{ needs.bump-version.outputs.new_version }} | ✅ Triggered |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌐 **Frontend** | ${{ needs.bump-version.outputs.new_version }} | ✅ Triggered |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🐳 **Docker** | ${{ needs.bump-version.outputs.new_version }} | ✅ Triggered |" >> $GITHUB_STEP_SUMMARY
 
-  # Wait for component builds to complete
+          echo "### ℹ️ Build Information" >> $GITHUB_STEP_SUMMARY
+          echo "- All components will be built with version **${{ needs.bump-version.outputs.new_version }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts will be attached to the final release" >> $GITHUB_STEP_SUMMARY
+          echo "- Individual components will not create separate releases" >> $GITHUB_STEP_SUMMARY
+          echo "- Build progress can be monitored in the Actions tab" >> $GITHUB_STEP_SUMMARY
+
   wait-for-builds:
     name: Wait for Component Builds
-    needs: [prepare, determine-version, trigger-builds]
+    needs: [bump-version, trigger-builds]
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for builds to complete
+      - name: Setup GitHub CLI
         run: |
-          echo "Waiting for builds to complete (60 seconds)..."
-          sleep 60
-          echo "Builds should now be complete or in progress."
+          # Authenticate GitHub CLI with the workflow token
+          echo "${{ github.token }}" | gh auth login --with-token
 
-  # Create GitHub Release with all artifacts
-  github-release:
-    name: Create GitHub Release
-    needs: [prepare, determine-version, wait-for-builds]
-    if: >
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.create_github_release == 'true') ||
-      github.event_name == 'push'
+      - name: Wait for builds to complete with polling
+        run: |
+          echo "Waiting for component builds to complete (polling every 30 seconds)..."
+          MAX_WAIT_TIME=1800  # 30 minutes maximum wait time (increased from 20)
+          POLL_INTERVAL=30    # 30 seconds between checks
+          ELAPSED_TIME=0
+          VERSION="${{ needs.bump-version.outputs.new_version }}"
+
+          echo "Looking for builds with version: $VERSION"
+          echo "This will check API, Frontend, and Docker builds"
+
+          # Define the function to check if workflow artifacts are ready
+          check_artifacts() {
+            local workflow=$1
+            local message="Checking $workflow artifacts for version $VERSION"
+            echo $message
+
+            # Use the GitHub API to look for completed runs of this workflow
+            # For Ubuntu compatibility, using date command without macOS-specific flags
+            HOUR_AGO=$(date -u -d "1 hour ago" +"%Y-%m-%dT%H:%M:%SZ" || date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+            # Search for workflows that match our version
+            gh api "repos/${{ github.repository }}/actions/workflows/$workflow/runs" \
+              --jq ".workflow_runs[] | select(.status == \"completed\" and .conclusion == \"success\" and .created_at > \"$HOUR_AGO\")" > workflow_runs.json
+
+            # Grep for our specific version to ensure we're finding the right build
+            if [ -s workflow_runs.json ] && grep -q "$VERSION" workflow_runs.json; then
+              echo "✅ Found completed successful $workflow run for version $VERSION"
+              return 0
+            else
+              echo "❌ No completed successful $workflow run found yet for version $VERSION"
+              return 1
+            fi
+          }
+
+          # Keep checking until all builds are complete or timeout is reached
+          while [ $ELAPSED_TIME -lt $MAX_WAIT_TIME ]; do
+            echo "Checking build status after ${ELAPSED_TIME} seconds..."
+
+            # Check status of each workflow
+            API_DONE=1
+            FRONTEND_DONE=1
+            DOCKER_DONE=1
+
+            check_artifacts "cd-build-api.yaml" && API_DONE=0
+            check_artifacts "cd-build-frontend.yaml" && FRONTEND_DONE=0
+            check_artifacts "cd-docker-build.yaml" && DOCKER_DONE=0
+
+            echo "API build completed: $([ $API_DONE -eq 0 ] && echo "Yes" || echo "No")"
+            echo "Frontend build completed: $([ $FRONTEND_DONE -eq 0 ] && echo "Yes" || echo "No")"
+            echo "Docker build completed: $([ $DOCKER_DONE -eq 0 ] && echo "Yes" || echo "No")"
+
+            # If all are done, we can exit
+            if [ $API_DONE -eq 0 ] && [ $FRONTEND_DONE -eq 0 ] && [ $DOCKER_DONE -eq 0 ]; then
+              echo "All builds are complete!"
+
+              # Wait a bit more to ensure artifacts are fully available
+              echo "Waiting 60 more seconds for artifacts to be fully available..."
+              sleep 60
+              exit 0
+            fi
+
+            # Sleep before next check
+            echo "Not all builds are complete, checking again in $POLL_INTERVAL seconds..."
+            sleep $POLL_INTERVAL
+            ELAPSED_TIME=$((ELAPSED_TIME + POLL_INTERVAL))
+          done
+
+          echo "Error: Maximum wait time of $MAX_WAIT_TIME seconds reached."
+          echo "The following builds have not completed:"
+          [ $API_DONE -eq 1 ] && echo "- API build"
+          [ $FRONTEND_DONE -eq 1 ] && echo "- Frontend build"
+          [ $DOCKER_DONE -eq 1 ] && echo "- Docker build"
+
+          echo "Release creation will be skipped to prevent incomplete artifacts."
+          exit 1
+
+  create-release:
+    name: Create Release ${{ needs.bump-version.outputs.new_tag }}
+    needs: [analyze-commits, bump-version, wait-for-builds]
+    if: needs.analyze-commits.outputs.has_new_commits == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ format('release/v{0}', needs.prepare.outputs.version) }}
-          token: ${{ github.token }}
+          fetch-depth: 0
+          ref: main
 
-      # Download all artifacts in one step
-      - name: Download all workflow artifacts
+      - name: Download API artifacts
         uses: dawidd6/action-download-artifact@v2
         with:
+          workflow: cd-build-api.yaml
           workflow_conclusion: success
-          if_no_artifact_found: warn
-          path: ./artifacts
-          check_artifacts: true
+          name: api-binaries
+          path: ./artifacts/api
+
+      - name: Download Frontend artifacts
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: cd-build-frontend.yaml
+          workflow_conclusion: success
+          name: frontend-bundle
+          path: ./artifacts/frontend
+
+      - name: Download Docker artifacts
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: cd-docker-build.yaml
+          workflow_conclusion: success
           search_artifacts: true
+          path: ./artifacts/docker-builds
 
-      - name: List collected artifacts
+      - name: Verify all artifacts were downloaded successfully
         run: |
-          echo "Downloaded artifacts:"
-          mkdir -p ./artifacts
-          find ./artifacts -type f | sort || echo "No artifacts found"
+          echo "Verifying all required artifacts were downloaded..."
 
-      - name: Create tag if it doesn't exist
-        run: |
-          # Check if tag exists
-          if ! git ls-remote --tags origin | grep -q "refs/tags/${{ needs.prepare.outputs.tag }}"; then
-            echo "Tag ${{ needs.prepare.outputs.tag }} does not exist, creating it now"
-            git tag ${{ needs.prepare.outputs.tag }}
-            git push origin ${{ needs.prepare.outputs.tag }}
+          # Check API artifacts
+          API_FILES=$(find ./artifacts/api -type f | wc -l)
+          if [ "$API_FILES" -eq 0 ]; then
+            echo "Error: No API artifacts found"
+            exit 1
           else
-            echo "Tag ${{ needs.prepare.outputs.tag }} already exists"
+            echo "✅ Found $API_FILES API artifact files"
           fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+          # Check Frontend artifacts
+          FRONTEND_FILES=$(find ./artifacts/frontend -type f | wc -l)
+          if [ "$FRONTEND_FILES" -eq 0 ]; then
+            echo "Error: No Frontend artifacts found"
+            exit 1
+          else
+            echo "✅ Found $FRONTEND_FILES Frontend artifact files"
+          fi
+
+          # Check Docker artifacts
+          DOCKER_FILES=$(find ./artifacts/docker-builds -type f | wc -l)
+          if [ "$DOCKER_FILES" -eq 0 ]; then
+            echo "Error: No Docker artifacts found"
+            exit 1
+          else
+            echo "✅ Found $DOCKER_FILES Docker artifact files"
+          fi
+
+          echo "All required artifacts were successfully downloaded"
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find ./artifacts -type f | sort
+
+      - name: Set Docker Image Information
+        id: docker_info
+        run: |
+          # Get repository owner in lowercase
+          LOWERCASE_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          REPO_NAME="web3-message-board"
+
+          # Debug information
+          echo "Repository owner: ${{ github.repository_owner }}"
+          echo "Lowercase owner: $LOWERCASE_OWNER"
+          echo "Repository name: $REPO_NAME"
+
+          # Define Docker image names
+          API_IMAGE="${LOWERCASE_OWNER}/${REPO_NAME}/api:${{ needs.bump-version.outputs.new_version }}"
+          FRONTEND_IMAGE="${LOWERCASE_OWNER}/${REPO_NAME}/frontend:${{ needs.bump-version.outputs.new_version }}"
+
+          # Debug expected paths
+          echo "Expected API image path: ghcr.io/$API_IMAGE"
+          echo "Expected Frontend image path: ghcr.io/$FRONTEND_IMAGE"
+          echo "This should match what's produced by the Docker build workflow"
+
+          # Check if any direct image paths are available
+          echo "Checking for images with direct repository owner path:"
+          echo "ghcr.io/${LOWERCASE_OWNER}/api:${{ needs.bump-version.outputs.new_version }}"
+          echo "ghcr.io/${LOWERCASE_OWNER}/frontend:${{ needs.bump-version.outputs.new_version }}"
+
+          # Set outputs
+          echo "api_image=ghcr.io/$API_IMAGE" >> $GITHUB_OUTPUT
+          echo "frontend_image=ghcr.io/$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
+
+      - name: Generate Docker configuration
+        run: |
+          mkdir -p ./artifacts/docker
+
+          # Create docker-compose.yml
+          cat > ./artifacts/docker/docker-compose.yml << EOF
+          version: '3.8'
+
+          services:
+            frontend:
+              image: ${{ steps.docker_info.outputs.frontend_image }}
+              ports:
+                - "3000:3000"
+              environment:
+                - API_URL=http://api:3001
+              depends_on:
+                - api
+
+            api:
+              image: ${{ steps.docker_info.outputs.api_image }}
+              ports:
+                - "3001:3001"
+              environment:
+                - DATABASE_URL=postgres://postgres:postgres@db:5432/messageboard
+              depends_on:
+                - db
+
+            db:
+              image: postgres:14
+              environment:
+                - POSTGRES_USER=postgres
+                - POSTGRES_PASSWORD=postgres
+                - POSTGRES_DB=messageboard
+              volumes:
+                - pg_data:/var/lib/postgresql/data
+
+          volumes:
+            pg_data:
+          EOF
+
+          # Create simple readme
+          cat > ./artifacts/docker/README.md << EOF
+          # Web3 Message Board Docker Deployment
+
+          This folder contains configuration files for deploying the application using Docker.
+
+          ## Images
+
+          - Frontend: \`${{ steps.docker_info.outputs.frontend_image }}\`
+          - API: \`${{ steps.docker_info.outputs.api_image }}\`
+
+          ## Quick Start
+
+          \`\`\`bash
+          # Pull the images
+          docker pull ${{ steps.docker_info.outputs.api_image }}
+          docker pull ${{ steps.docker_info.outputs.frontend_image }}
+
+          # Run with docker-compose
+          docker-compose -f docker-compose.yml up -d
+          \`\`\`
+          EOF
+
+      - name: Create Release ${{ needs.bump-version.outputs.new_tag }}
+        id: create_release
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.prepare.outputs.tag }}
-          name: Release ${{ needs.prepare.outputs.tag }}
-          draft: false
-          prerelease: false
+          tag_name: ${{ needs.bump-version.outputs.new_tag }}
+          name: Release ${{ needs.bump-version.outputs.new_tag }}
           generate_release_notes: true
           files: |
-            ./artifacts/**/*
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+            ./artifacts/api/*
+            ./artifacts/frontend/*
+            ./artifacts/docker/*
+            ./artifacts/docker-builds/**/*
+          body: |
+            ## Release Information
+            - **Version:** ${{ needs.bump-version.outputs.new_tag }}
+            - **Released by:** @${{ github.actor }}
+            - **Type:** ${{ needs.analyze-commits.outputs.release_type }} release
+            - **Date:** ${{ github.event.repository.updated_at }}
+
+            ## Component Versions
+            - **API:** ${{ needs.bump-version.outputs.new_version }}
+            - **Frontend:** ${{ needs.bump-version.outputs.new_version }}
+
+            ## Docker Images
+            - **API**: `${{ steps.docker_info.outputs.api_image }}`
+            - **Frontend**: `${{ steps.docker_info.outputs.frontend_image }}`
+
+            ### Container Registry
+            All images are available from GitHub Container Registry (ghcr.io)
+
+            ```bash
+            docker pull ${{ steps.docker_info.outputs.api_image }}
+            docker pull ${{ steps.docker_info.outputs.frontend_image }}
+            ```
+
+            ## Release Notes
+            _The following release notes are automatically generated_
 
       - name: Generate release summary
         run: |
-          echo "## 🚀 Release ${{ needs.prepare.outputs.tag }} Created" >> $GITHUB_STEP_SUMMARY
-          echo "Version ${{ needs.prepare.outputs.version }} has been released successfully." >> $GITHUB_STEP_SUMMARY
-          echo "- Tag created: ${{ needs.prepare.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Release branch: release/v${{ needs.prepare.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Artifacts collected and attached to release" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "View the release at:" >> $GITHUB_STEP_SUMMARY
-          echo "https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          # Count artifacts for better reporting
+          API_COUNT=$(find ./artifacts/api -type f | wc -l)
+          FRONTEND_COUNT=$(find ./artifacts/frontend -type f | wc -l)
+          TOTAL_COUNT=$((API_COUNT + FRONTEND_COUNT))
 
-  # Deploy artifacts if requested
-  deploy:
-    name: Deploy Artifacts
-    needs: [prepare, github-release, determine-version]
-    if: >
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_artifacts == 'true' && github.event.inputs.create_github_release == 'true') ||
-      github.event_name == 'push'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ format('release/v{0}', needs.prepare.outputs.version) }}
-          token: ${{ github.token }}
-
-      - name: Deploy to staging
-        run: |
-          echo "Deploying version ${{ needs.prepare.outputs.version }} to staging environment"
-          # Add your deployment commands here
-
-      - name: Generate deployment summary
-        run: |
-          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎉 Release Published" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Release Information" >> $GITHUB_STEP_SUMMARY
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🏷️ **Version** | v${{ needs.prepare.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🌐 **Environment** | Staging |" >> $GITHUB_STEP_SUMMARY
-          echo "| 👤 **Deployed by** | @${{ needs.prepare.outputs.actor }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🕒 **Deployment Date** | $(date) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏷️ **Version** | ${{ needs.bump-version.outputs.new_tag }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📈 **Release Type** | ${{ needs.analyze-commits.outputs.release_type }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 👤 **Released by** | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔗 **Release URL** | [${{ github.repository }}/releases/tag/${{ needs.bump-version.outputs.new_tag }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.bump-version.outputs.new_tag }}) |" >> $GITHUB_STEP_SUMMARY
+
+          echo "### 📦 Released Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Artifacts | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$API_COUNT" -gt 0 ]; then
+            echo "| 🖥️ **API** | $API_COUNT | ✅ Included |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 🖥️ **API** | 0 | ⚠️ Missing |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "$FRONTEND_COUNT" -gt 0 ]; then
+            echo "| 🌐 **Frontend** | $FRONTEND_COUNT | ✅ Included |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 🌐 **Frontend** | 0 | ⚠️ Missing |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "| **Total** | $TOTAL_COUNT | |" >> $GITHUB_STEP_SUMMARY
+
+          echo "### 🚀 Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "To deploy this release, run the Ansible deployment workflow with:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version tag**: ${{ needs.bump-version.outputs.new_tag }}" >> $GITHUB_STEP_SUMMARY
