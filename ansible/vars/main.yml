@@ -104,7 +104,7 @@ users:
 service_name: "api"
 service_description: "Web3 Message Board API Service"
 service_github_repo: "JonathonJulian/web3-message-board"
-service_release_version: "v0.0.3"
+service_release_version: "v0.1.5-beta.1"
 service_env_vars:
   PORT: "8080"
   MONAD_CONTRACT_ADDRESS: "0xEFD38108dfE2c80f29579E6D692c4009586A3f59"
@@ -113,5 +113,5 @@ service_env_vars:
 # Static site configuration
 static_site_name: "frontend"
 static_site_github_repo: "JonathonJulian/web3-message-board"
-static_site_release_version: "v0.0.13"
+static_site_release_version: "v0.1.5-beta.1"
 static_site_archive_pattern: "frontend-bundle.tar.gz"

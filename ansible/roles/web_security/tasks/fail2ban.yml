@@ -30,17 +30,6 @@
   notify: Restart fail2ban
   tags: ['security', 'fail2ban']
 
-# Configure Nginx badbots filter
-- name: Create fail2ban Nginx badbots filter
-  ansible.builtin.template:
-    src: fail2ban_nginx_badbots.conf.j2
-    dest: /etc/fail2ban/filter.d/nginx-badbots.conf
-    owner: root
-    group: root
-    mode: 0644
-  notify: Restart fail2ban
-  tags: ['security', 'fail2ban']
-
 # Make sure the socket directory exists with correct permissions
 - name: Ensure fail2ban socket directory exists
   ansible.builtin.file:
@@ -77,21 +66,6 @@
   register: fail2ban_active
   changed_when: false
   ignore_errors: true
-  when: not ansible_check_mode
-  tags: ['security', 'fail2ban']
-
-# Always check the logs, even if service shows failed
-- name: Check detailed fail2ban logs
-  ansible.builtin.shell: journalctl -u fail2ban -n 10
-  register: fail2ban_logs_detail
-  changed_when: false
-  ignore_errors: true
-  when: not ansible_check_mode
-  tags: ['security', 'fail2ban']
-
-- name: Display detailed fail2ban logs
-  ansible.builtin.debug:
-    var: fail2ban_logs_detail.stdout_lines | default(['No log data available'])
   when: not ansible_check_mode
   tags: ['security', 'fail2ban']
 

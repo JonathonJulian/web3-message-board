@@ -1,7 +1,7 @@
 # Makefile for managing infrastructure, helm deployments, and configuration
 # Variables
-ANSIBLE_INVENTORY ?= ansible-playbook/inventory.ini
-ANSIBLE_VAULT_PASS ?= ansible-playbook/.vault_pass
+ANSIBLE_INVENTORY ?= ansible/inventory.ini
+ANSIBLE_VAULT_PASS ?= ansible/.vault_pass
 HELM_NAMESPACE ?= monad
 VM_NAME ?= web-server-nginx-cloud-5
 KUBERNETES_CONTEXT ?= k3s-main
@@ -218,16 +218,23 @@ ansible-deps:
 		fi; \
 	else \
 		echo "Setting up Ansible environment..."; \
-		$(MAKE) github-runner-setup; \
+		if [ -n "$$USE_SIMPLIFIED_SETUP" ]; then \
+			echo "Using simplified setup (skipping full runner setup)..."; \
+			python3 -m venv .ansible_venv; \
+			. .ansible_venv/bin/activate && pip install ansible kubernetes>=24.2.0 PyYAML>=6.0; \
+			touch .ansible_deps_installed; \
+		else \
+			$(MAKE) github-runner-setup; \
+		fi; \
 	fi
 
 .PHONY: ansible-deploy
 ansible-deploy: ansible-deps
 	@echo "Running Ansible playbook..."
 	@if [ -f ".ansible_venv/bin/activate" ]; then \
-		. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini; \
+		. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini $(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',); \
 	else \
-		cd ansible && ansible-playbook msg_board.yaml -i inventory.ini; \
+		cd ansible && ansible-playbook msg_board.yaml -i inventory.ini $(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',); \
 	fi
 
 .PHONY: ansible-deploy-ssh
@@ -235,7 +242,8 @@ ansible-deploy-ssh: ansible-deps
 	@echo "Running Ansible playbook with SSH key authentication..."
 	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini \
 		--private-key=$(SSH_KEY_FILE) \
-		-e 'auth={"method":"ssh_key"}'
+		-e 'auth={"method":"ssh_key"}' \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-deploy-password
 ansible-deploy-password: ansible-deps
@@ -247,37 +255,44 @@ ansible-deploy-password: ansible-deps
 	@echo "Running Ansible playbook with password authentication..."
 	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini \
 		--extra-vars "ansible_password=$(SSH_PASSWORD) ansible_become_password=$(SSH_PASSWORD)" \
-		-e 'auth={"method":"password"}'
+		-e 'auth={"method":"password"}' \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-nginx
 ansible-nginx: ansible-deps
 	@echo "Running Ansible Nginx role..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags nginx
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags nginx \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-frontend
 ansible-frontend: ansible-deps
 	@echo "Running Ansible frontend role..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags frontend
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags frontend \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-logging
 ansible-logging: ansible-deps
 	@echo "Running Ansible logging role..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags logging
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags logging \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-api
 ansible-api: ansible-deps
 	@echo "Running Go role for API..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags api
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags api \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-security
 ansible-security: ansible-deps
 	@echo "Running Ansible security roles..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags security,users,firewall,ssh
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags security,users,firewall,ssh \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-hosts
 ansible-hosts: ansible-deps
 	@echo "Running hosts role..."
-	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags hosts
+	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini --tags hosts \
+		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 # Complete Environment Management
 .PHONY: setup-all
@@ -424,7 +439,7 @@ github-runner-setup:
 	@echo "[github_runners]" > /tmp/github_runner_inventory.ini
 	@echo "localhost ansible_connection=local" >> /tmp/github_runner_inventory.ini
 	# Run the Ansible playbook locally with current directory as project root
-	ansible-playbook ansible/github_actions_setup.yml -i /tmp/github_runner_inventory.ini -e "project_root=$(shell pwd)"
+	ansible-playbook ansible/runner.yaml -i /tmp/github_runner_inventory.ini -e "project_root=$(shell pwd)"
 	@echo ""
 	@echo "Setup completed successfully!"
 	@if [ -f "activate_ansible_env.sh" ]; then \
