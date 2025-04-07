@@ -60,19 +60,6 @@ help:
 	@echo "  docker-build-multiarch - Build multi-architecture Docker images"
 	@echo "  docker-compose-up - Start all services with Docker Compose"
 	@echo "  docker-compose-down - Stop all services with Docker Compose"
-	@echo "  lint             - Run all linters"
-	@echo "  lint-yaml        - Lint YAML files"
-	@echo "  lint-workflows   - Lint only GitHub Actions workflows"
-	@echo "  lint-js          - Lint JavaScript/TypeScript files"
-	@echo "  lint-go          - Lint Go code"
-	@echo "  format           - Format code"
-	@echo "  setup-linters    - Install all linting tools"
-	@echo "  fix-yaml         - Fix common YAML linting issues"
-	@echo "  fix-workflows    - Fix common GitHub Actions workflow issues"
-	@echo "  lint-all         - Run all linting checks"
-	@echo "  fix-all          - Fix all automatic linting issues"
-	@echo "  fix-ansible      - Fix Ansible linting issues"
-	@echo "  fix-helm         - Fix Helm chart linting issues"
 
 # VM Management
 .PHONY: vm-create
@@ -444,85 +431,6 @@ github-runner-setup:
 		echo "To activate the Ansible virtual environment, run:"; \
 		echo "  source ./activate_ansible_env.sh"; \
 	fi
-
-# Specialized linting targets
-# ------------------------------------------------------------------------------------
-.PHONY: lint
-lint: lint-yaml lint-workflows lint-js lint-go lint-helm
-	@echo "All linters run!"
-
-.PHONY: lint-yaml
-lint-yaml: ## Lint YAML files
-	@echo "Linting YAML files..."
-	@echo "==== GitHub Actions Workflows ===="
-	@yamllint -c .yamllint.yaml .github/workflows/
-	@echo "\n==== Ansible Configuration ===="
-	@yamllint -c .yamllint.yaml ansible/
-	@echo "\n==== Helm Charts (non-template files) ===="
-	@yamllint -c .yamllint.yaml monitoring/Chart.yaml monitoring/values.yaml
-	@echo "\n==== Docker Compose ===="
-	@yamllint -c .yamllint.yaml docker-compose.yml
-
-.PHONY: lint-helm
-lint-helm: ## Lint Helm charts with helm lint
-	@echo "Linting Helm charts..."
-	@./tools/lint_helm_templates.sh
-
-.PHONY: lint-workflows
-lint-workflows: ## Lint only GitHub Actions workflows
-	@echo "Linting GitHub Actions workflows..."
-	@if ! command -v actionlint &> /dev/null; then \
-		echo "actionlint not found. Installing..."; \
-		go install github.com/rhysd/actionlint/cmd/actionlint@latest; \
-	fi
-	@echo "Running yamllint on workflows..."
-	@yamllint -c .yamllint.yaml .github/workflows/
-	@echo "\nRunning actionlint for GitHub Actions specific validation..."
-	@actionlint -color || true
-	@echo "\nWorkflow linting complete!"
-
-.PHONY: fix-all
-fix-all: fix-yaml fix-workflows fix-ansible fix-helm
-	@echo "All automatic fixes applied!"
-
-.PHONY: fix-ansible
-fix-ansible:
-	@echo "Fixing Ansible linting issues..."
-	@./tools/fix_ansible_linting.sh
-
-.PHONY: fix-helm
-fix-helm:
-	@echo "Fixing Helm chart linting issues..."
-	@./tools/fix_helm_linting.sh
-	@echo "Run 'make lint-helm' to verify template validity."
-
-.PHONY: fix-yaml
-fix-yaml:
-	@echo "Fixing YAML files..."
-	@./tools/fix_yaml.sh
-
-.PHONY: fix-workflows
-fix-workflows:
-	@echo "Fixing shell script issues..."
-	@./tools/fix_workflow_shell_scripts.sh
-	@echo "See .github/workflows/SHELL_SCRIPT_NOTES.md for details on remaining manual fixes needed."
-
-.PHONY: lint-js
-lint-js:
-	@echo "Linting JavaScript/TypeScript files..."
-	cd frontend && npm run lint
-
-.PHONY: lint-go
-lint-go:
-	@echo "Linting Go code..."
-	cd api && golangci-lint run
-
-.PHONY: format
-format:
-	@echo "Formatting code..."
-	prettier --write .github/**/*.{yml,yaml}
-	cd frontend && npm run format
-	cd api && go fmt ./...
 
 # Default target
 .DEFAULT_GOAL := help
