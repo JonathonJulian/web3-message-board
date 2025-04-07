@@ -5,9 +5,9 @@
 logging_agent: alloy  # Options: "promtail" or "alloy"
 
 # Shared variables
-loki_url: "http://localhost:3100"
+loki_url: "http://grafana.local/loki-push"
 log_paths: "/var/log/*.log"
-environment: "production"
+deployment_environment: "production"
 
 # Default logs configuration (used if global 'logs' var is not defined)
 logs:

@@ -8,7 +8,7 @@ local.file_match "{{ log.name | replace('-', '_') }}" {
     __address__ = "localhost",
     __path__    = "{{ log.path }}",
     job         = "{{ log.job }}",
-    env         = "{{ environment | default('production') }}",
+    env         = "{{ deployment_environment | default('production') }}",
     host        = "{{ inventory_hostname }}",
     {% if log.type is defined %}
     type        = "{{ log.type }}",
@@ -28,7 +28,7 @@ local.file_match "system" {
     __address__ = "localhost",
     __path__    = "{{ log_paths | default('/var/log/*.log') }}",
     job         = "system_logs",
-    env         = "{{ environment | default('production') }}",
+    env         = "{{ deployment_environment | default('production') }}",
     host        = "{{ inventory_hostname }}",
   }]
 }
@@ -41,7 +41,7 @@ local.file_match "{{ path_item.name | replace('-', '_') }}" {
     __address__ = "localhost",
     __path__    = "{{ path_item.path }}",
     job         = "{{ path_item.job | default(path_item.name + '_logs') }}",
-    env         = "{{ environment | default('production') }}",
+    env         = "{{ deployment_environment | default('production') }}",
     host        = "{{ inventory_hostname }}",
     {% for label_key, label_value in (path_item.labels | default({})).items() %}
     {{ label_key }} = "{{ label_value }}",
@@ -81,7 +81,7 @@ loki.write "default" {
     {% endif %}
   }
   external_labels = {
-    env = "{{ environment | default('production') }}",
+    env = "{{ deployment_environment | default('production') }}",
     host = "{{ inventory_hostname }}",
     {% if additional_labels is defined %}
     {% for label_key, label_value in additional_labels.items() %}
