@@ -1,0 +1,69 @@
+#cloud-config
+hostname: ${hostname}
+fqdn: ${hostname}.${domain}
+manage_etc_hosts: true
+ssh_pwauth: false
+
+# Higher priority for network config
+datasource:
+  OVF:
+    apply_network_config: false  # Disable OVF network config
+
+# Tell cloud-init to use this network config
+network:
+  config: disabled  # Disable cloud-init's default networking
+  version: 2
+  ethernets:
+    ens192:
+%{ if network_type == "static" }
+      dhcp4: false
+      addresses:
+        - ${ip_address}/${subnet_mask}
+      gateway4: ${gateway}
+%{ else }
+      dhcp4: true
+%{ endif }
+      nameservers:
+        addresses: ${jsonencode(dns_servers)}
+
+# Force files to control network configuration
+write_files:
+  - path: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+    owner: root:root
+    permissions: '0644'
+    content: |
+      network: {config: disabled}
+  - path: /etc/netplan/60-static-ip.yaml
+    owner: root:root
+    permissions: '0644'
+    content: |
+      network:
+        version: 2
+        ethernets:
+          ens192:
+%{ if network_type == "static" }
+            dhcp4: false
+            addresses:
+              - ${ip_address}/${subnet_mask}
+            routes:
+              - to: default
+                via: ${gateway}
+%{ else }
+            dhcp4: true
+%{ endif }
+            nameservers:
+              addresses: ${jsonencode(dns_servers)}
+
+# This will run at the end of cloud-init
+runcmd:
+  - netplan apply
+
+users:
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ${ssh_key}
+
+package_update: true
+package_upgrade: true
