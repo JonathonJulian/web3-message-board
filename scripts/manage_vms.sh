@@ -134,7 +134,7 @@ function apply_config() {
   echo "Applying Terraform configuration..."
 
   cd "$CONFIG_DIR" || exit 1
-  terraform init
+  terraform init -upgrade
   terraform apply -auto-approve
 
   echo "Terraform apply completed"

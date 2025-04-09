@@ -177,6 +177,12 @@ jobs:
             echo "Static IP: $IP_ADDRESS/$SUBNET_MASK"
           fi
 
+          # First initialize Terraform with upgrade to handle provider version changes
+          echo "Initializing Terraform with provider upgrades..."
+          cd ./terraform/environments/dev
+          terraform init -upgrade
+          cd -
+
           # Run the script with appropriate parameters
           if [[ "$ACTION" == "list" ]]; then
             ./scripts/manage_vms.sh list
