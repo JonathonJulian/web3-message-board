@@ -1,0 +1,20 @@
+# vSphere connection details
+vsphere_user     = "administrator@vsphere.local"
+vsphere_password = "Pyjkat58!@"
+vsphere_server   = "192.168.1.100"
+
+# vSphere infrastructure details
+datacenter = "DC0"
+datastore  = "SSD"
+cluster    = "LabCluster"
+host       = "192.168.1.67"
+network    = "VM Network"
+vm_folder  = "/DevOps-VMs"
+
+# Network settings
+vm_domain      = "local"
+default_gateway = "192.168.1.254"
+dns_servers    = ["8.8.8.8", "8.8.4.4"]
+
+# Authentication
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO3sOFB9wGEcOgNO5BfxF35Sh+EAOxWTZjx//DK4XHAx jon@example.com"
