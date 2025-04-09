@@ -334,8 +334,8 @@ jobs:
           STATUS_ARRAY=()
 
           # Initial wait to give VMs time to boot
-          echo "Waiting 30 seconds for VMs to complete initialization..."
-          sleep 30
+          echo "Waiting 45 seconds for VMs to complete initialization..."
+          sleep 45
 
           # Loop through each VM
           for VM_KEY in $(echo "$VM_CONFIGS" | jq -r 'keys[]'); do
@@ -346,12 +346,13 @@ jobs:
               IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address")
 
               echo "Checking if VM $VM_NAME ($IP_ADDRESS) is online..."
-              STATUS="Offline (timeout)"
-              SSH_STATUS="Unknown"
 
-              # First do a basic connectivity check without output
-              if ping -c 3 -W 5 "$IP_ADDRESS" &> /dev/null; then
-                echo "VM $VM_NAME ($IP_ADDRESS) is responding to ping"
+              # Simple ping test with basic parameters - similar to manual SSH approach
+              ping -c 5 "$IP_ADDRESS"
+              PING_EXIT=$?
+
+              if [ $PING_EXIT -eq 0 ]; then
+                echo "✅ VM $VM_NAME ($IP_ADDRESS) is responding to ping"
                 STATUS="Online"
 
                 # Check SSH availability
@@ -361,37 +362,10 @@ jobs:
                   SSH_STATUS="Port Closed"
                 fi
               else
-                echo "Initial ping check failed, starting iterative checks..."
-
-                # Try more aggressive ping attempts
-                MAX_ATTEMPTS=15
-                SUCCESS=false
-
-                for ((i=1; i<=MAX_ATTEMPTS; i++)); do
-                  # Try with more packets and longer timeout
-                  if ping -c 5 -W 10 "$IP_ADDRESS" &> /dev/null; then
-                    echo "VM $VM_NAME ($IP_ADDRESS) is online after $i attempts"
-                    STATUS="Online"
-                    SUCCESS=true
-
-                    # Check SSH availability
-                    if timeout 5 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
-                      SSH_STATUS="Available"
-                    else
-                      SSH_STATUS="Port Closed"
-                    fi
-
-                    break
-                  fi
-
-                  echo "Attempt $i/$MAX_ATTEMPTS: VM $VM_NAME ($IP_ADDRESS) not responding yet"
-                  sleep 20  # Longer pause between attempts
-                done
-
-                if [[ "$SUCCESS" == "false" ]]; then
-                  echo "Warning: Could not ping VM, but marking as potentially available since ping may be blocked"
-                  STATUS="Unknown (Ping Failed)"
-                fi
+                echo "❌ VM $VM_NAME ($IP_ADDRESS) not responding to ping"
+                echo "Note: VM may still be booting or ping may be blocked"
+                STATUS="Pending (No Ping)"
+                SSH_STATUS="Unknown"
               fi
 
               # Generate SSH command
