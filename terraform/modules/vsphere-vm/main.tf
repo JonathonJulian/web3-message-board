@@ -50,7 +50,7 @@ resource "vsphere_virtual_machine" "vm" {
 
   # VM hardware settings from template or overrides
   num_cpus             = var.vm_cpu_override != null ? var.vm_cpu_override : data.vsphere_ovf_vm_template.ubuntu_cloud.num_cpus
-  num_cores_per_socket = data.vsphere_ovf_vm_template.ubuntu_cloud.num_cores_per_socket
+  num_cores_per_socket = 1  # Explicitly set to 1 to prevent drift
   memory               = var.vm_memory_override != null ? var.vm_memory_override : data.vsphere_ovf_vm_template.ubuntu_cloud.memory
   guest_id             = data.vsphere_ovf_vm_template.ubuntu_cloud.guest_id
   firmware             = data.vsphere_ovf_vm_template.ubuntu_cloud.firmware
