@@ -82,6 +82,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq curl
 
+      - name: Configure hosts file for MinIO access
+        run: |
+          # Add entry to /etc/hosts for minio.local
+          echo "192.168.1.77 minio.local" | sudo tee -a /etc/hosts
+          # Verify we can ping the hostname
+          ping -c 1 minio.local || echo "Warning: Could not ping minio.local"
+
       - name: Configure Terraform
         uses: hashicorp/setup-terraform@v2
         with:
