@@ -76,13 +76,13 @@ fi
 
 # Run the script with appropriate parameters
 if [[ "$ACTION" == "list" ]]; then
-    ./manage_vms.sh list
+    ./scripts/manage_vms.sh list
 elif [[ "$ACTION" == "add" && -n "$VM_NAME" ]]; then
-    ./manage_vms.sh add "$VM_NAME" "$NETWORK_TYPE" "$IP_ADDRESS" "$SUBNET_MASK"
+    ./scripts/manage_vms.sh add "$VM_NAME" "$NETWORK_TYPE" "$IP_ADDRESS" "$SUBNET_MASK"
 elif [[ "$ACTION" == "remove" && -n "$VM_NAME" ]]; then
-    ./manage_vms.sh remove "$VM_NAME"
+    ./scripts/manage_vms.sh remove "$VM_NAME"
 elif [[ "$ACTION" == "apply" ]]; then
-    ./manage_vms.sh apply
+    ./scripts/manage_vms.sh apply
 else
     echo "Invalid action or missing required parameters"
     exit 1

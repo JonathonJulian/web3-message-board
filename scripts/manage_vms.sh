@@ -8,9 +8,15 @@ NETWORK_TYPE="${3:-dhcp}"
 IP_ADDRESS="${4:-}"
 SUBNET_MASK="${5:-24}"
 
-# Configuration paths
-CONFIG_DIR="./environments/dev"
+# Configuration paths - adjust for scripts directory
+CONFIG_DIR="../terraform/environments/dev"
 TFVARS_FILE="${CONFIG_DIR}/terraform.tfvars.json"
+
+# Auto-adjust paths if run from project root
+if [[ -d "./terraform" && ! -d "../terraform" ]]; then
+  CONFIG_DIR="./terraform/environments/dev"
+  TFVARS_FILE="${CONFIG_DIR}/terraform.tfvars.json"
+fi
 
 # Ensure we have required parameters
 if [[ "$ACTION" == "add" && -z "$VM_NAME" ]]; then
@@ -37,7 +43,7 @@ function get_vm_configs() {
 # Function to update vm_configs in tfvars
 function update_vm_configs() {
   local vm_configs="$1"
-  
+
   # Create or update terraform.tfvars.json
   if [[ -f "$TFVARS_FILE" ]]; then
     # Update existing file
@@ -47,7 +53,7 @@ function update_vm_configs() {
     # Create new tfvars file
     echo "{\"vm_configs\": $vm_configs}" > "$TFVARS_FILE"
   fi
-  
+
   echo "Updated VM configurations in $TFVARS_FILE"
 }
 
@@ -58,10 +64,10 @@ function add_vm() {
   local network_type="$3"
   local ip_address="$4"
   local subnet_mask="$5"
-  
+
   # Get existing configurations
   local vm_configs=$(get_vm_configs)
-  
+
   # Create new VM config
   if [[ "$network_type" == "static" ]]; then
     new_vm=$(jq -n \
@@ -84,13 +90,13 @@ function add_vm() {
         "network_type": $network_type
       }')
   fi
-  
+
   # Add the new VM to the configurations
   updated_configs=$(echo "$vm_configs" | jq --arg key "$vm_key" --argjson vm "$new_vm" '. + {($key): $vm}')
-  
+
   # Update the tfvars file
   update_vm_configs "$updated_configs"
-  
+
   echo "Added VM '$vm_key' to configurations"
 }
 
@@ -104,33 +110,33 @@ function list_vms() {
 # Remove a VM configuration
 function remove_vm() {
   local vm_key="$1"
-  
+
   # Get existing configurations
   local vm_configs=$(get_vm_configs)
-  
+
   # Check if VM exists
   if ! echo "$vm_configs" | jq -e --arg key "$vm_key" 'has($key)' > /dev/null; then
     echo "Error: VM '$vm_key' not found in configurations"
     exit 1
   fi
-  
+
   # Remove the VM
   updated_configs=$(echo "$vm_configs" | jq --arg key "$vm_key" 'del(.[$key])')
-  
+
   # Update the tfvars file
   update_vm_configs "$updated_configs"
-  
+
   echo "Removed VM '$vm_key' from configurations"
 }
 
 # Apply the Terraform configuration
 function apply_config() {
   echo "Applying Terraform configuration..."
-  
+
   cd "$CONFIG_DIR" || exit 1
   terraform init
   terraform apply -auto-approve
-  
+
   echo "Terraform apply completed"
 }
 
