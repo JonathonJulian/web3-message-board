@@ -1,12 +1,60 @@
 #!/bin/bash
 set -e
 
-# Command arguments
-ACTION="${1:-help}"
-VM_NAME="${2:-}"
-NETWORK_TYPE="${3:-dhcp}"
-IP_ADDRESS="${4:-}"
-SUBNET_MASK="${5:-24}"
+# Default values
+ACTION=""
+VM_NAME=""
+NETWORK_TYPE="dhcp"
+IP_ADDRESS=""
+SUBNET_MASK="24"
+SSH_PUBLIC_KEY=""
+
+# Parse named parameters
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --action=*)
+      ACTION="${1#*=}"
+      shift
+      ;;
+    --vm-name=*)
+      VM_NAME="${1#*=}"
+      shift
+      ;;
+    --network-type=*)
+      NETWORK_TYPE="${1#*=}"
+      shift
+      ;;
+    --ip-address=*)
+      IP_ADDRESS="${1#*=}"
+      shift
+      ;;
+    --subnet-mask=*)
+      SUBNET_MASK="${1#*=}"
+      shift
+      ;;
+    --ssh-public-key=*)
+      SSH_PUBLIC_KEY="${1#*=}"
+      shift
+      ;;
+    *)
+      # Support legacy positional arguments for backward compatibility
+      if [[ -z "$ACTION" ]]; then
+        ACTION="$1"
+      elif [[ -z "$VM_NAME" ]]; then
+        VM_NAME="$1"
+      elif [[ -z "$NETWORK_TYPE" ]]; then
+        NETWORK_TYPE="$1"
+      elif [[ -z "$IP_ADDRESS" ]]; then
+        IP_ADDRESS="$1"
+      elif [[ -z "$SUBNET_MASK" ]]; then
+        SUBNET_MASK="$1"
+      elif [[ -z "$SSH_PUBLIC_KEY" ]]; then
+        SSH_PUBLIC_KEY="$1"
+      fi
+      shift
+      ;;
+  esac
+done
 
 # Configuration paths - adjust for scripts directory
 CONFIG_DIR="../terraform/environments/dev"
@@ -21,7 +69,7 @@ fi
 # Ensure we have required parameters
 if [[ "$ACTION" == "add" && -z "$VM_NAME" ]]; then
   echo "Error: VM_NAME is required for add action"
-  echo "Usage: $0 add <vm_name> [network_type] [ip_address] [subnet_mask]"
+  echo "Usage: $0 --action=add --vm-name=<name> [--network-type=static|dhcp] [--ip-address=<ip>] [--subnet-mask=<mask>] [--ssh-public-key=<key>]"
   exit 1
 fi
 
@@ -59,45 +107,50 @@ function update_vm_configs() {
 
 # Add a new VM configuration
 function add_vm() {
-  local vm_key="$1"
-  local vm_name="$2"
-  local network_type="$3"
-  local ip_address="$4"
-  local subnet_mask="$5"
+  local vm_name="$1"
+  local network_type="$2"
+  local ip_address="$3"
+  local subnet_mask="$4"
+  local ssh_public_key="$5"
 
-  # Get existing configurations
-  local vm_configs=$(get_vm_configs)
-
-  # Create new VM config
+  echo "Adding VM: $vm_name with network type: $network_type"
   if [[ "$network_type" == "static" ]]; then
-    new_vm=$(jq -n \
-      --arg name "$vm_name" \
-      --arg network_type "$network_type" \
-      --arg ip_address "$ip_address" \
-      --arg subnet_mask "$subnet_mask" \
-      '{
-        "name": $name,
-        "network_type": $network_type,
-        "ip_address": $ip_address,
-        "subnet_mask": $subnet_mask
-      }')
-  else
-    new_vm=$(jq -n \
-      --arg name "$vm_name" \
-      --arg network_type "$network_type" \
-      '{
-        "name": $name,
-        "network_type": $network_type
-      }')
+    echo "Static IP configuration: $ip_address/$subnet_mask"
   fi
 
-  # Add the new VM to the configurations
-  updated_configs=$(echo "$vm_configs" | jq --arg key "$vm_key" --argjson vm "$new_vm" '. + {($key): $vm}')
+  # Ensure configuration file exists
+  if [[ ! -f "$TFVARS_FILE" ]]; then
+    echo '{"vm_configs":{}}' > "$TFVARS_FILE"
+  fi
 
-  # Update the tfvars file
-  update_vm_configs "$updated_configs"
+  # Load existing configurations
+  local existing_configs=$(cat "$TFVARS_FILE")
 
-  echo "Added VM '$vm_key' to configurations"
+  # Update with new VM config
+  local vm_config="{\"name\":\"$vm_name\",\"network_type\":\"$network_type\""
+  if [[ "$network_type" == "static" ]]; then
+    vm_config="$vm_config,\"ip_address\":\"$ip_address\",\"subnet_mask\":\"$subnet_mask\""
+  fi
+  if [[ -n "$ssh_public_key" ]]; then
+    # Escape the ssh key for JSON
+    local escaped_key=$(echo "$ssh_public_key" | sed 's/"/\\"/g')
+    vm_config="$vm_config,\"ssh_public_key\":\"$escaped_key\""
+  fi
+  vm_config="$vm_config}"
+
+  # Replace or add VM configuration
+  local vm_key="\"$vm_name\":"
+  if echo "$existing_configs" | grep -q "$vm_key"; then
+    # Update existing VM
+    jq ".vm_configs.$vm_name = $vm_config" "$TFVARS_FILE" > "${TFVARS_FILE}.tmp"
+    mv "${TFVARS_FILE}.tmp" "$TFVARS_FILE"
+  else
+    # Add new VM
+    jq ".vm_configs += {\"$vm_name\": $vm_config}" "$TFVARS_FILE" > "${TFVARS_FILE}.tmp"
+    mv "${TFVARS_FILE}.tmp" "$TFVARS_FILE"
+  fi
+
+  echo "VM configuration added/updated successfully."
 }
 
 # List all configured VMs
@@ -143,7 +196,7 @@ function apply_config() {
 # Main command handling
 case "$ACTION" in
   add)
-    add_vm "$VM_NAME" "$VM_NAME" "$NETWORK_TYPE" "$IP_ADDRESS" "$SUBNET_MASK"
+    add_vm "$VM_NAME" "$NETWORK_TYPE" "$IP_ADDRESS" "$SUBNET_MASK" "$SSH_PUBLIC_KEY"
     ;;
   list)
     list_vms

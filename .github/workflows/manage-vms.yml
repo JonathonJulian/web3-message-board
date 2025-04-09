@@ -164,6 +164,47 @@ jobs:
           SUBNET_MASK="${{ steps.params.outputs.subnet_mask }}"
           SSH_PUBLIC_KEY="${{ steps.params.outputs.ssh_public_key }}"
 
+          # Check if IP is already in use and find a free one if needed
+          if [[ "$NETWORK_TYPE" == "static" && "$ACTION" == "add" ]]; then
+            echo "Checking if IP $IP_ADDRESS is available..."
+
+            # Extract the base IP prefix (first 3 octets)
+            IP_PREFIX=$(echo "$IP_ADDRESS" | cut -d. -f1-3)
+            IP_LAST_OCTET=$(echo "$IP_ADDRESS" | cut -d. -f4)
+
+            # Try pinging the IP to check if it's in use
+            ATTEMPTS=0
+            MAX_ATTEMPTS=50  # Don't try more than 50 IPs (octet max is 254)
+            CURRENT_IP="$IP_ADDRESS"
+            CURRENT_OCTET="$IP_LAST_OCTET"
+
+            while ping -c 1 -W 1 "$CURRENT_IP" &>/dev/null && [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+              echo "IP $CURRENT_IP is already in use. Trying next IP..."
+              ATTEMPTS=$((ATTEMPTS + 1))
+              CURRENT_OCTET=$((CURRENT_OCTET + 1))
+
+              # Ensure we stay in valid IP range (1-254)
+              if [ $CURRENT_OCTET -gt 254 ]; then
+                echo "Warning: Reached end of IP range. Wrapping around to start."
+                CURRENT_OCTET=1
+              fi
+
+              CURRENT_IP="${IP_PREFIX}.${CURRENT_OCTET}"
+            done
+
+            if [ $ATTEMPTS -ge $MAX_ATTEMPTS ]; then
+              echo "Error: Could not find an available IP after $MAX_ATTEMPTS attempts."
+              exit 1
+            fi
+
+            if [ "$CURRENT_IP" != "$IP_ADDRESS" ]; then
+              echo "Original IP $IP_ADDRESS was in use. Using $CURRENT_IP instead."
+              IP_ADDRESS="$CURRENT_IP"
+            else
+              echo "IP $IP_ADDRESS is available. Proceeding with deployment."
+            fi
+          fi
+
           # Set vSphere credentials as Terraform environment variables
           export TF_VAR_vsphere_user="${{ secrets.VSPHERE_USER }}"
           export TF_VAR_vsphere_password="${{ secrets.VSPHERE_PASSWORD }}"
@@ -190,33 +231,18 @@ jobs:
 
           # First initialize Terraform with upgrade to handle provider version changes
           echo "Initializing Terraform with provider upgrades..."
-          cd ./terraform/environments/dev
+          cd terraform/environments/dev
           terraform init -upgrade
-          cd -
 
-          # Run the script with appropriate parameters
-          if [[ "$ACTION" == "list" ]]; then
-            ./scripts/manage_vms.sh list
-          elif [[ "$ACTION" == "add" && -n "$VM_NAME" ]]; then
-            # First add the VM configuration
-            echo "Step 1: Adding VM configuration..."
-            ./scripts/manage_vms.sh add "$VM_NAME" "$NETWORK_TYPE" "$IP_ADDRESS" "$SUBNET_MASK"
-
-            # Then apply the configuration
-            echo "Step 2: Applying configuration to create the VM..."
-            ./scripts/manage_vms.sh apply
-          elif [[ "$ACTION" == "remove" && -n "$VM_NAME" ]]; then
-            ./scripts/manage_vms.sh remove "$VM_NAME"
-
-            # Apply after removing
-            echo "Applying configuration to remove the VM..."
-            ./scripts/manage_vms.sh apply
-          elif [[ "$ACTION" == "apply" ]]; then
-            ./scripts/manage_vms.sh apply
-          else
-            echo "Invalid action or missing required parameters"
-            exit 1
-          fi
+          # Run manage_vms.sh script with parameters
+          cd ../../../
+          bash ./scripts/manage_vms.sh \
+            --action="$ACTION" \
+            --vm-name="$VM_NAME" \
+            --network-type="$NETWORK_TYPE" \
+            --ip-address="$IP_ADDRESS" \
+            --subnet-mask="$SUBNET_MASK" \
+            --ssh-public-key="$SSH_PUBLIC_KEY"
 
           # Save VM configurations for next steps
           if [[ -f "./terraform/environments/dev/terraform.tfvars.json" ]]; then
