@@ -88,12 +88,6 @@ jobs:
           terraform --version
           echo "Using existing Terraform installation on the runner"
 
-      - name: Configure hosts file for MinIO access
-        run: |
-          # Skip hosts file modification since we can't use sudo
-          echo "Skipping hosts file modification since we can't use sudo"
-          echo "Assuming MinIO hostname is already configured on the runner"
-
       - name: Set parameters based on mode
         id: params
         run: |
@@ -120,26 +114,11 @@ jobs:
           # Create the destination directory
           mkdir -p ./terraform/environments/dev
 
-          # Use hard-coded config for first run to avoid MinIO issues
-          echo '{
-            "vm_configs": {
-              "github-runner": {
-                "name": "github-runner",
-                "network_type": "static",
-                "ip_address": "192.168.1.200",
-                "subnet_mask": "24"
-              },
-              "webserver": {
-                "name": "webserver",
-                "network_type": "static",
-                "ip_address": "192.168.1.201",
-                "subnet_mask": "24"
-              }
-            }
-          }' > ./terraform/environments/dev/terraform.tfvars.json
+          # Pull configurations from MinIO using the working command
+          mc cp myminio/terraform-state/vm-configs.json ./terraform/environments/dev/terraform.tfvars.json
 
           # Display the current configurations
-          echo "Current VM configurations (using hard-coded values):"
+          echo "Current VM configurations (pulled from MinIO):"
           cat ./terraform/environments/dev/terraform.tfvars.json | jq .
 
       - name: Run VM management script
