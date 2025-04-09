@@ -71,7 +71,7 @@ env:
 
 jobs:
   manage-vms:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -86,53 +86,10 @@ jobs:
         run: |
           # Add entry to /etc/hosts for minio.local
           echo "192.168.1.77 minio.local" | sudo tee -a /etc/hosts
-
-          # Display network information
-          echo "Network Configuration:"
-          echo "======================"
-          ip addr show
-          echo "======================"
-          echo "Routing Table:"
-          echo "======================"
-          ip route
-          echo "======================"
-          echo "DNS Servers:"
-          echo "======================"
-          cat /etc/resolv.conf
-          echo "======================"
-          echo "Hosts File:"
-          cat /etc/hosts
-          echo "======================"
-
-          # Test connectivity
-          echo "Testing connectivity to MinIO:"
-          echo "Ping test to minio.local:"
+          # Verify we can ping the hostname
           ping -c 1 minio.local || echo "Warning: Could not ping minio.local"
-
-          echo "Ping test to IP directly:"
-          ping -c 1 192.168.1.77 || echo "Warning: Could not ping 192.168.1.77"
-
-          echo "Traceroute to MinIO:"
-          traceroute 192.168.1.77 || echo "Traceroute failed"
-
-          echo "Testing HTTP connection to MinIO:"
-          curl -v ${{ env.MINIO_ENDPOINT || 'http://minio.local' }} 2>&1 || echo "Warning: Could not connect to MinIO via HTTP"
-
-          # Try alternative DNS configurations
-          echo "Trying DNS resolution with different resolvers:"
-          dig minio.local @8.8.8.8 || echo "DNS resolution failed with Google DNS"
-          dig minio.local @1.1.1.1 || echo "DNS resolution failed with Cloudflare DNS"
-
-          # Install netcat for port testing
-          sudo apt-get install -y netcat
-
-          # Test if MinIO port is open
-          echo "Testing if port 9000 is open on MinIO server:"
-          nc -zvw3 192.168.1.77 9000 || echo "Warning: Could not connect to port 9000 on 192.168.1.77"
-
-          # Test if MinIO port is open by hostname
-          echo "Testing if port 9000 is open on MinIO server by hostname:"
-          nc -zvw3 minio.local 9000 || echo "Warning: Could not connect to port 9000 on minio.local"
+          # List available files in MinIO (for debugging)
+          curl -s ${{ env.MINIO_ENDPOINT || 'http://minio.local' }} || echo "Warning: Could not connect to MinIO"
 
       - name: Configure Terraform
         uses: hashicorp/setup-terraform@v2
@@ -166,58 +123,34 @@ jobs:
           curl -sL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
           chmod +x /tmp/mc
 
-          # Try with hostname first
+          # Configure MinIO client with verbose output
           echo "Configuring MinIO client for ${{ env.MINIO_ENDPOINT }}..."
           /tmp/mc alias set myminio "${{ env.MINIO_ENDPOINT }}" "${{ env.MINIO_ACCESS_KEY }}" "${{ env.MINIO_SECRET_KEY }}" --api S3v4
 
-          # Check if alias setup worked
-          if ! /tmp/mc ls myminio/ &>/dev/null; then
-            echo "Failed to connect using hostname, trying direct IP..."
-            /tmp/mc alias set myminio "http://192.168.1.77" "${{ env.MINIO_ACCESS_KEY }}" "${{ env.MINIO_SECRET_KEY }}" --api S3v4
-          fi
-
           # Debug: List contents of bucket
           echo "Contents of ${{ env.MINIO_BUCKET }} bucket:"
-          /tmp/mc ls myminio/${{ env.MINIO_BUCKET }}/ || echo "Failed to list bucket contents"
+          /tmp/mc ls myminio/${{ env.MINIO_BUCKET }}/
 
           # Create the destination directory
           mkdir -p ./terraform/environments/dev
 
-          # Try to fetch our configurations, or upload them if not found
-          echo "Trying to get existing VM configurations..."
-          if /tmp/mc cp myminio/${{ env.MINIO_BUCKET }}/vm-configs.json ./terraform/environments/dev/terraform.tfvars.json &>/dev/null; then
-            echo "Successfully downloaded vm-configs.json"
-            echo "CONFIGS_PULLED=true" >> $GITHUB_ENV
-          elif /tmp/mc cp myminio/${{ env.MINIO_BUCKET }}/vm-configs/terraform.tfvars.json ./terraform/environments/dev/terraform.tfvars.json &>/dev/null; then
-            echo "Successfully downloaded vm-configs/terraform.tfvars.json"
+          # Check both possible paths for the config file
+          echo "Checking for vm-configs.json..."
+          if /tmp/mc stat myminio/${{ env.MINIO_BUCKET }}/${{ env.MINIO_OBJECT_PATH }} &>/dev/null; then
+            echo "Found file at vm-configs.json, copying..."
+            /tmp/mc cp myminio/${{ env.MINIO_BUCKET }}/${{ env.MINIO_OBJECT_PATH }} ./terraform/environments/dev/terraform.tfvars.json
             echo "CONFIGS_PULLED=true" >> $GITHUB_ENV
           else
-            echo "No existing VM configurations found in MinIO. Creating a new file."
-
-            # Hardcode the existing configurations we know should be there
-            echo '{
-              "vm_configs": {
-                "github-runner": {
-                  "name": "github-runner",
-                  "network_type": "static",
-                  "ip_address": "192.168.1.200",
-                  "subnet_mask": "24"
-                },
-                "webserver": {
-                  "name": "webserver",
-                  "network_type": "static",
-                  "ip_address": "192.168.1.201",
-                  "subnet_mask": "24"
-                }
-              }
-            }' > ./terraform/environments/dev/terraform.tfvars.json
-
-            echo "Created file with known configurations"
-            echo "CONFIGS_PULLED=false" >> $GITHUB_ENV
-
-            # Try to upload this file to MinIO
-            echo "Attempting to upload configurations to MinIO..."
-            /tmp/mc cp ./terraform/environments/dev/terraform.tfvars.json myminio/${{ env.MINIO_BUCKET }}/vm-configs.json || echo "Failed to upload configurations"
+            echo "Checking for vm-configs/terraform.tfvars.json..."
+            if /tmp/mc stat myminio/${{ env.MINIO_BUCKET }}/vm-configs/terraform.tfvars.json &>/dev/null; then
+              echo "Found file at vm-configs/terraform.tfvars.json, copying..."
+              /tmp/mc cp myminio/${{ env.MINIO_BUCKET }}/vm-configs/terraform.tfvars.json ./terraform/environments/dev/terraform.tfvars.json
+              echo "CONFIGS_PULLED=true" >> $GITHUB_ENV
+            else
+              echo "No existing VM configurations found in MinIO. Creating a new configuration file."
+              echo '{"vm_configs": {}}' > ./terraform/environments/dev/terraform.tfvars.json
+              echo "CONFIGS_PULLED=false" >> $GITHUB_ENV
+            fi
           fi
 
           # Display the current configurations
