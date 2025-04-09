@@ -407,8 +407,14 @@ jobs:
             fi
           done
 
-          # Combine status objects into JSON array and save
-          ( IFS=$'\n'; echo "[${STATUS_ARRAY[*]}]" ) > /tmp/vm_status.json
+          # Combine status objects into JSON array and save - fixed to properly format JSON
+          # Instead of concatenating strings, use jq to properly build the array
+          echo '[]' > /tmp/vm_status.json
+          for item in "${STATUS_ARRAY[@]}"; do
+            # Add each item to the array one at a time using jq
+            jq --argjson item "$item" '. += [$item]' /tmp/vm_status.json > /tmp/vm_status.json.tmp
+            mv /tmp/vm_status.json.tmp /tmp/vm_status.json
+          done
 
       - name: Generate summary
         if: always()
@@ -448,8 +454,17 @@ jobs:
             echo "| VM Key | Name | IP Address | Status | SSH | Access Command |" >> $GITHUB_STEP_SUMMARY
             echo "|--------|------|------------|--------|-----|---------------|" >> $GITHUB_STEP_SUMMARY
 
-            # Process the status file and add each VM to the table
-            jq -r '.[] | "| \(.key) | \(.name) | \(.ip) | \(.status) | \(.ssh_status) | `\(.ssh_command)` |"' /tmp/vm_status.json >> $GITHUB_STEP_SUMMARY
+            # Process the status file with better error handling
+            if jq -e . /tmp/vm_status.json > /dev/null 2>&1; then
+              # Process the status file and add each VM to the table
+              jq -r '.[] | "| \(.key) | \(.name) | \(.ip) | \(.status) | \(.ssh_status) | `\(.ssh_command)` |"' /tmp/vm_status.json >> $GITHUB_STEP_SUMMARY || {
+                echo "| ⚠️ Error | Error processing status file | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
+                echo "Error details: Invalid JSON format in status file" >> $GITHUB_STEP_SUMMARY
+              }
+            else
+              echo "| ⚠️ Error | Error processing status file | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
+              echo "Error details: Invalid JSON format in status file" >> $GITHUB_STEP_SUMMARY
+            fi
 
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "## Access Instructions" >> $GITHUB_STEP_SUMMARY
@@ -464,19 +479,26 @@ jobs:
             echo "| VM Key | Name | Network Type | IP Address |" >> $GITHUB_STEP_SUMMARY
             echo "|--------|------|-------------|------------|" >> $GITHUB_STEP_SUMMARY
 
-            # Process the configurations and add each VM to the table
-            VM_CONFIGS=$(jq -r '.vm_configs' /tmp/vm_configs.json)
-            for VM_KEY in $(echo "$VM_CONFIGS" | jq -r 'keys[]'); do
-              VM_NAME=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].name")
-              NETWORK_TYPE=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].network_type")
-              if [[ "$NETWORK_TYPE" == "static" ]]; then
-                IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address")
-                SUBNET_MASK=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].subnet_mask // \"24\"")
-                echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | $IP_ADDRESS/$SUBNET_MASK |" >> $GITHUB_STEP_SUMMARY
-              else
-                echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | DHCP |" >> $GITHUB_STEP_SUMMARY
-              fi
-            done
+            # Process the configurations with better error handling
+            if [[ -f "/tmp/vm_configs.json" ]] && jq -e . /tmp/vm_configs.json > /dev/null 2>&1; then
+              # Process the configurations and add each VM to the table
+              VM_CONFIGS=$(jq -r '.vm_configs' /tmp/vm_configs.json)
+              for VM_KEY in $(echo "$VM_CONFIGS" | jq -r 'keys[]' 2>/dev/null || echo ""); do
+                if [[ -n "$VM_KEY" ]]; then
+                  VM_NAME=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].name" 2>/dev/null || echo "Unknown")
+                  NETWORK_TYPE=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].network_type" 2>/dev/null || echo "Unknown")
+                  if [[ "$NETWORK_TYPE" == "static" ]]; then
+                    IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address" 2>/dev/null || echo "Unknown")
+                    SUBNET_MASK=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].subnet_mask // \"24\"" 2>/dev/null || echo "24")
+                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | $IP_ADDRESS/$SUBNET_MASK |" >> $GITHUB_STEP_SUMMARY
+                  else
+                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | DHCP |" >> $GITHUB_STEP_SUMMARY
+                  fi
+                fi
+              done
+            else
+              echo "| ⚠️ Error | Error processing configuration file | - | - |" >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "No VM configurations found." >> $GITHUB_STEP_SUMMARY
           fi
@@ -486,3 +508,10 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "VM configurations are stored in MinIO at:" >> $GITHUB_STEP_SUMMARY
           echo "- **URL:** \`${{ env.MINIO_ENDPOINT }}/${{ env.MINIO_BUCKET }}/${{ env.MINIO_OBJECT_PATH }}\`" >> $GITHUB_STEP_SUMMARY
+
+          # Add push status if available
+          if [[ "${{ env.MINIO_PUSH_STATUS }}" == "success" ]]; then
+            echo "- **Status:** ✅ Successfully pushed to MinIO" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ env.MINIO_PUSH_STATUS }}" == "failed" ]]; then
+            echo "- **Status:** ❌ Failed to push to MinIO" >> $GITHUB_STEP_SUMMARY
+          fi
