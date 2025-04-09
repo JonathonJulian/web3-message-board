@@ -57,7 +57,7 @@ env:
 
   # For testing (non-main branches), use repository variables or defaults
   TEST_ACTION: ${{ vars.TEST_ACTION || 'add' }}
-  TEST_VM_NAME: ${{ vars.TEST_VM_NAME || 'runner-1' }}
+  TEST_VM_NAME: ${{ vars.TEST_VM_NAME || 'webserver' }}
   TEST_NETWORK_TYPE: ${{ vars.TEST_NETWORK_TYPE || 'static' }}
   TEST_IP_ADDRESS: ${{ vars.TEST_IP_ADDRESS || '192.168.1.201' }}
   TEST_SUBNET_MASK: ${{ vars.TEST_SUBNET_MASK || '24' }}
