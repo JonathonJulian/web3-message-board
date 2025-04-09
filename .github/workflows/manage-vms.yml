@@ -147,6 +147,15 @@ jobs:
           IP_ADDRESS="${{ steps.params.outputs.ip_address }}"
           SUBNET_MASK="${{ steps.params.outputs.subnet_mask }}"
 
+          # Set vSphere credentials as Terraform environment variables
+          export TF_VAR_vsphere_user="${{ secrets.VSPHERE_USER }}"
+          export TF_VAR_vsphere_password="${{ secrets.VSPHERE_PASSWORD }}"
+          export TF_VAR_vsphere_server="${{ secrets.VSPHERE_SERVER }}"
+
+          # Set MinIO S3 credentials for Terraform backend
+          export AWS_ACCESS_KEY_ID="${{ env.MINIO_ACCESS_KEY }}"
+          export AWS_SECRET_ACCESS_KEY="${{ env.MINIO_SECRET_KEY }}"
+
           echo "Running with: ACTION=$ACTION, VM_NAME=$VM_NAME, NETWORK_TYPE=$NETWORK_TYPE"
           if [[ "$NETWORK_TYPE" == "static" ]]; then
             echo "Static IP: $IP_ADDRESS/$SUBNET_MASK"
@@ -173,42 +182,6 @@ jobs:
           else
             echo "CONFIGS_SAVED=false" >> $GITHUB_ENV
           fi
-
-      - name: Push updated configurations to MinIO
-        run: |
-          # Make sure our script is executable
-          chmod +x ./scripts/push_to_minio.sh
-
-          # Run the MinIO push script with environment variables
-          MINIO_ENDPOINT="${{ env.MINIO_ENDPOINT }}" \
-          MINIO_ACCESS_KEY="${{ env.MINIO_ACCESS_KEY }}" \
-          MINIO_SECRET_KEY="${{ env.MINIO_SECRET_KEY }}" \
-          MINIO_BUCKET="${{ env.MINIO_BUCKET }}" \
-          MINIO_OBJECT_PATH="${{ env.MINIO_OBJECT_PATH }}" \
-          ./scripts/push_to_minio.sh
-
-      - name: Apply Terraform configuration if add/remove was performed
-        if: |
-          env.CONFIGS_SAVED == 'true' &&
-          (steps.params.outputs.action == 'add' || steps.params.outputs.action == 'remove' || steps.params.outputs.action == 'apply')
-        run: |
-          cd ./terraform/environments/dev
-
-          # Set vSphere credentials as Terraform environment variables
-          export TF_VAR_vsphere_user="${{ secrets.VSPHERE_USER }}"
-          export TF_VAR_vsphere_password="${{ secrets.VSPHERE_PASSWORD }}"
-          export TF_VAR_vsphere_server="${{ secrets.VSPHERE_SERVER }}"
-
-          # Set MinIO S3 credentials for Terraform backend
-          export AWS_ACCESS_KEY_ID="${{ env.MINIO_ACCESS_KEY }}"
-          export AWS_SECRET_ACCESS_KEY="${{ env.MINIO_SECRET_KEY }}"
-
-          # Show that we're using environment variables (without revealing values)
-          echo "Using vSphere and MinIO credentials from GitHub Secrets"
-
-          # Initialize and apply Terraform with backend configuration
-          terraform init
-          terraform apply -auto-approve
 
       - name: Wait for VMs to come online and verify accessibility
         if: |
