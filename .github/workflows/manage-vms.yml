@@ -38,6 +38,10 @@ on:
         required: false
         type: string
         default: '24'
+      ssh_public_key:
+        description: 'SSH public key for the ubuntu user'
+        required: false
+        type: string
 
 env:
   # Determine if we're in test mode based on branch (anything other than main/master)
@@ -49,6 +53,7 @@ env:
   PROD_NETWORK_TYPE: ${{ github.event.inputs.network_type }}
   PROD_IP_ADDRESS: ${{ github.event.inputs.ip_address }}
   PROD_SUBNET_MASK: ${{ github.event.inputs.subnet_mask }}
+  PROD_SSH_PUBLIC_KEY: ${{ github.event.inputs.ssh_public_key }}
 
   # For testing (non-main branches), use repository variables or defaults
   TEST_ACTION: ${{ vars.TEST_ACTION || 'add' }}
@@ -56,6 +61,7 @@ env:
   TEST_NETWORK_TYPE: ${{ vars.TEST_NETWORK_TYPE || 'static' }}
   TEST_IP_ADDRESS: ${{ vars.TEST_IP_ADDRESS || '192.168.1.201' }}
   TEST_SUBNET_MASK: ${{ vars.TEST_SUBNET_MASK || '24' }}
+  TEST_SSH_PUBLIC_KEY: ${{ vars.TEST_SSH_PUBLIC_KEY || 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO3sOFB9wGEcOgNO5BfxF35Sh+EAOxWTZjx//DK4XHAx jon@blocknative.com' }}
 
   # vSphere credentials from secrets
   VSPHERE_SERVER: ${{ secrets.VSPHERE_SERVER }}
@@ -99,6 +105,7 @@ jobs:
             echo "network_type=${{ env.TEST_NETWORK_TYPE }}" >> $GITHUB_OUTPUT
             echo "ip_address=${{ env.TEST_IP_ADDRESS }}" >> $GITHUB_OUTPUT
             echo "subnet_mask=${{ env.TEST_SUBNET_MASK }}" >> $GITHUB_OUTPUT
+            echo "ssh_public_key=${{ env.TEST_SSH_PUBLIC_KEY }}" >> $GITHUB_OUTPUT
           else
             echo "Using PRODUCTION mode parameters from workflow inputs"
             echo "action=${{ env.PROD_ACTION }}" >> $GITHUB_OUTPUT
@@ -106,6 +113,7 @@ jobs:
             echo "network_type=${{ env.PROD_NETWORK_TYPE }}" >> $GITHUB_OUTPUT
             echo "ip_address=${{ env.PROD_IP_ADDRESS }}" >> $GITHUB_OUTPUT
             echo "subnet_mask=${{ env.PROD_SUBNET_MASK }}" >> $GITHUB_OUTPUT
+            echo "ssh_public_key=${{ env.PROD_SSH_PUBLIC_KEY }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Pull VM configurations from MinIO
@@ -154,11 +162,13 @@ jobs:
           NETWORK_TYPE="${{ steps.params.outputs.network_type }}"
           IP_ADDRESS="${{ steps.params.outputs.ip_address }}"
           SUBNET_MASK="${{ steps.params.outputs.subnet_mask }}"
+          SSH_PUBLIC_KEY="${{ steps.params.outputs.ssh_public_key }}"
 
           # Set vSphere credentials as Terraform environment variables
           export TF_VAR_vsphere_user="${{ secrets.VSPHERE_USER }}"
           export TF_VAR_vsphere_password="${{ secrets.VSPHERE_PASSWORD }}"
           export TF_VAR_vsphere_server="${{ secrets.VSPHERE_SERVER }}"
+          export TF_VAR_ssh_public_key="$SSH_PUBLIC_KEY"
 
           # Set MinIO S3 credentials for Terraform backend (explicitly naming both AWS and original variables)
           export AWS_ACCESS_KEY_ID="${{ secrets.MINIO_ACCESS_KEY || env.MINIO_ACCESS_KEY }}"
@@ -176,6 +186,7 @@ jobs:
           if [[ "$NETWORK_TYPE" == "static" ]]; then
             echo "Static IP: $IP_ADDRESS/$SUBNET_MASK"
           fi
+          echo "Using SSH public key: $SSH_PUBLIC_KEY"
 
           # First initialize Terraform with upgrade to handle provider version changes
           echo "Initializing Terraform with provider upgrades..."
@@ -218,9 +229,39 @@ jobs:
             cp ./terraform/environments/dev/terraform.tfvars.json "$TEMP_FILE"
 
             # Configure MinIO client again in case this is a separate shell session
-            mc alias set myminio http://minio.local minioadmin minioadmin
+            echo "Configuring MinIO client for push operation..."
+            mc alias set myminio "${{ secrets.MINIO_ENDPOINT || env.MINIO_ENDPOINT }}" "${{ secrets.MINIO_ACCESS_KEY || env.MINIO_ACCESS_KEY }}" "${{ secrets.MINIO_SECRET_KEY || env.MINIO_SECRET_KEY }}"
 
-            mc cp "$TEMP_FILE" myminio/terraform-state/vm-configs.json || echo "Failed to push to MinIO, but continuing"
+            # Verify MinIO connectivity before push
+            echo "Verifying MinIO connectivity..."
+            if ! mc ls myminio/ &>/dev/null; then
+              echo "ERROR: Unable to connect to MinIO server at ${{ secrets.MINIO_ENDPOINT || env.MINIO_ENDPOINT }}"
+              echo "MinIO connection test failed. Check hostname, credentials, and network connectivity."
+              echo "Will save configuration locally but not push to MinIO."
+              echo "MINIO_PUSH_STATUS=failed" >> $GITHUB_ENV
+            else
+              echo "MinIO connection successful. Proceeding with push operation."
+
+              # Verify bucket exists
+              echo "Verifying bucket exists: ${{ env.MINIO_BUCKET }}"
+              if ! mc ls myminio/"${{ env.MINIO_BUCKET }}/" &>/dev/null; then
+                echo "Bucket doesn't exist, attempting to create it..."
+                mc mb myminio/"${{ env.MINIO_BUCKET }}/" || {
+                  echo "ERROR: Failed to create bucket ${{ env.MINIO_BUCKET }}"
+                  echo "MINIO_PUSH_STATUS=failed" >> $GITHUB_ENV
+                }
+              fi
+
+              # Push the configuration
+              echo "Pushing configuration to myminio/${{ env.MINIO_BUCKET }}/${{ env.MINIO_OBJECT_PATH }}..."
+              if mc cp "$TEMP_FILE" myminio/"${{ env.MINIO_BUCKET }}"/"${{ env.MINIO_OBJECT_PATH }}"; then
+                echo "Successfully pushed configuration to MinIO"
+                echo "MINIO_PUSH_STATUS=success" >> $GITHUB_ENV
+              else
+                echo "ERROR: Failed to push configuration to MinIO"
+                echo "MINIO_PUSH_STATUS=failed" >> $GITHUB_ENV
+              fi
+            fi
 
             echo "CONFIGS_SAVED=true" >> $GITHUB_ENV
           else
@@ -327,6 +368,7 @@ jobs:
           NETWORK_TYPE="${{ steps.params.outputs.network_type }}"
           IP_ADDRESS="${{ steps.params.outputs.ip_address }}"
           SUBNET_MASK="${{ steps.params.outputs.subnet_mask }}"
+          SSH_PUBLIC_KEY="${{ steps.params.outputs.ssh_public_key }}"
 
           echo "- **Mode:** \`${{ env.IS_TEST_MODE == 'true' && 'TEST' || 'PRODUCTION' }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Action:** \`$ACTION\`" >> $GITHUB_STEP_SUMMARY
