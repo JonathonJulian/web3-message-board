@@ -1,0 +1,100 @@
+# Default values for postgres-operator
+# This is a YAML-formatted file.
+
+# UI configuration
+ui:
+  enabled: true
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: nginx
+    hosts:
+      - host: postgres-ui.local
+        paths:
+          - path: /
+            pathType: Prefix
+
+# Postgres Operator configuration
+postgres-operator:
+  # Minimal configuration - using most defaults from the operator
+  configGeneral:
+    # Docker image for postgres instances
+    docker_image: ghcr.io/zalando/spilo-15:3.0-p1
+    # Enable pod anti-affinity to spread pods across nodes
+    enable_pod_antiaffinity: true
+    # Enable automatic resource management
+    enable_pod_disruption_budget: true
+    # Enable shm volume for shared memory
+    enable_shm_volume: true
+    # Use encrypted passwords in manifest CRDs
+    enable_password_rotation: true
+    # Add the team label to all resources
+    team_admin_role: postgres_admins
+    # Maximum number of instances in a cluster
+    max_instances: 3
+    # Default resources for postgres pods
+    default_cpu_request: "100m"
+    default_memory_request: "256Mi"
+    default_cpu_limit: "500m"
+    default_memory_limit: "1Gi"
+    # Users to create in PostgreSQL clusters
+    users:
+      message_board_user:
+        protected: true
+        teamRole: admin
+    # Database configurations
+    databases:
+      message_board:
+        owner: message_board_user
+
+# PostgreSQL cluster template (will be used by custom templates)
+postgresClusterTemplate: |
+  apiVersion: "acid.zalan.do/v1"
+  kind: postgresql
+  metadata:
+    name: message-board-db
+    namespace: web3
+  spec:
+    teamId: "web3"
+    volume:
+      size: 10Gi
+    numberOfInstances: 2
+    users:
+      message_board_user:
+        - superuser
+        - createdb
+    databases:
+      message_board: message_board_user
+    postgresql:
+      version: "15"
+      parameters:
+        shared_buffers: "128MB"
+        max_connections: "100"
+        work_mem: "4MB"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9187"
+
+# PostgreSQL cluster configuration
+# Set createCluster to true to deploy a PostgreSQL cluster with the operator
+createCluster: true
+clusterName: "message-board-db"
+volumeSize: "10Gi"
+replicas: 2
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "1Gi"

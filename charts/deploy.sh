@@ -5,6 +5,8 @@ set -e
 NAMESPACE=${NAMESPACE:-"web3"}
 RELEASE_NAME_MINIO=${RELEASE_NAME_MINIO:-"minio-storage"}
 RELEASE_NAME_LOKI=${RELEASE_NAME_LOKI:-"loki-stack"}
+RELEASE_NAME_PG=${RELEASE_NAME_PG:-"postgres-operator"}
+DEPLOY_PG=${DEPLOY_PG:-"false"}
 
 # Create namespace if it doesn't exist
 kubectl get namespace $NAMESPACE > /dev/null 2>&1 || kubectl create namespace $NAMESPACE
@@ -29,9 +31,19 @@ helm dependency build ./loki-stack
 echo "Deploying Loki Stack..."
 helm upgrade --install ${RELEASE_NAME_LOKI} ./loki-stack --namespace ${NAMESPACE}
 
+# Step 5: Deploy PostgreSQL Operator if enabled
+if [ "$DEPLOY_PG" = "true" ]; then
+  echo "Deploying PostgreSQL Operator..."
+  cd postgres-operator && ./deploy-postgres.sh
+  cd ..
+fi
+
 echo "Deployment completed successfully!"
 echo ""
 echo "You can access the following services:"
 echo "- MinIO: http://minio.local"
 echo "- Grafana: http://grafana.local"
 echo "- Loki: http://loki.local"
+if [ "$DEPLOY_PG" = "true" ]; then
+  echo "- PostgreSQL Operator UI: http://postgres-ui.local"
+fi

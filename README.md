@@ -419,3 +419,191 @@ make lint-yaml      # Run YAML linting on all files
 - `ansible/`: Ansible playbooks and roles
 - `monitoring/`: Helm charts for monitoring stack
 - `terraform/`: Terraform for provisioning VMs on vSphere
+
+# vSphere VM Deployment Automation
+
+This repository contains a Terraform module and automation scripts for deploying and managing VMs in a VMware vSphere environment.
+
+## Features
+
+- Declarative VM deployment with Terraform
+- Both static IP and DHCP network configurations
+- Cloud-init for guest OS customization
+- SSH key injection
+- GitHub Actions workflows for automated VM management
+
+## Directory Structure
+
+```
+├── terraform/
+│   ├── modules/
+│   │   └── vsphere-vm/          # Core Terraform module
+│   │       ├── main.tf          # Main module code
+│   │       ├── variables.tf     # Module variables
+│   │       ├── outputs.tf       # Module outputs
+│   │       ├── versions.tf      # Provider requirements
+│   │       └── templates/       # Cloud-init templates
+│   └── environments/
+│       └── dev/                 # Development environment
+│           ├── main.tf          # Module implementation
+│           └── terraform.tfvars.json  # VM configurations
+├── .github/
+│   └── workflows/
+│       ├── manage-vms.yml       # GitHub Actions workflow
+│       └── test.env             # Test environment template
+└── manage_vms.sh                # VM management script
+```
+
+## VM Management Script
+
+The `manage_vms.sh` script provides a simple CLI for managing VMs:
+
+```bash
+# Add a VM with static IP
+./manage_vms.sh add web-server-3 static 192.168.1.97 24
+
+# Add a VM with DHCP
+./manage_vms.sh add db-server-1 dhcp
+
+# List configured VMs
+./manage_vms.sh list
+
+# Remove a VM
+./manage_vms.sh remove web-server-1
+
+# Apply configuration (create/update VMs)
+./manage_vms.sh apply
+```
+
+## GitHub Actions Workflow
+
+The GitHub Actions workflow automates VM management through a centralized interface.
+
+### Testing on Non-Default Branches
+
+When testing on non-default branches (anything other than main/master), the workflow will use repository variables instead of workflow inputs.
+
+#### Setting Up Repository Variables
+
+1. Go to your GitHub repository
+2. Navigate to Settings > Secrets and variables > Actions
+3. Select the "Variables" tab
+4. Add the following variables:
+
+| Name | Description | Example Value |
+|------|-------------|--------------|
+| TEST_ACTION | Action to perform (add, remove, list, apply) | add |
+| TEST_VM_NAME | VM name to create/manage | test-runner-1 |
+| TEST_NETWORK_TYPE | Network type (static or dhcp) | static |
+| TEST_IP_ADDRESS | IP address for static IP | 192.168.1.100 |
+| TEST_SUBNET_MASK | Subnet mask in CIDR notation | 24 |
+
+#### Setting Up Required Secrets
+
+For both production and testing environments, you need to set up the following secrets:
+
+| Name | Description |
+|------|-------------|
+| VSPHERE_SERVER | vSphere server URL |
+| VSPHERE_USER | vSphere username |
+| VSPHERE_PASSWORD | vSphere password |
+
+### Running the Workflow
+
+1. For testing (non-default branches):
+   - Set the repository variables as described above
+   - Run the workflow - it will use the repository variables automatically
+
+2. For production (main/master branch):
+   - The workflow will prompt for inputs when manually triggered
+   - Fill in the requested information in the workflow run form
+
+## Terraform Module Usage
+
+The Terraform module can be used directly in your own Terraform configurations:
+
+```hcl
+module "vsphere_vms" {
+  source = "../../modules/vsphere-vm"
+
+  datacenter     = "Your-Datacenter"
+  datastore      = "Your-Datastore"
+  cluster        = "Your-Cluster"
+  host           = "Your-Host"
+  network        = "Your-Network"
+  vm_folder      = "Your-Folder"
+
+  ssh_public_key = "ssh-rsa AAAA... your-key"
+  default_gateway = "192.168.1.1"
+  dns_servers     = ["8.8.8.8", "8.8.4.4"]
+
+  vm_configs = {
+    "web-server-1" = {
+      name         = "web-server-1"
+      network_type = "static"
+      ip_address   = "192.168.1.95"
+    },
+    "db-server-1" = {
+      name         = "db-server-1"
+      network_type = "dhcp"
+    }
+  }
+}
+```
+
+## PostgreSQL Operator
+
+The project supports using the Zalando PostgreSQL Operator for managing PostgreSQL clusters in Kubernetes. This provides several benefits:
+
+- High availability with automated failover
+- Backups and point-in-time recovery
+- Resource management and scaling
+- Credentials management through Kubernetes secrets
+
+### Deploying PostgreSQL Operator
+
+To deploy the PostgreSQL Operator:
+
+```bash
+# Deploy the PostgreSQL Operator with UI and a PostgreSQL cluster
+make postgres-deploy
+
+# Deploy only the PostgreSQL Operator UI
+make postgres-ui-deploy
+
+# Deploy only a PostgreSQL cluster
+make postgres-cluster-deploy
+
+# Delete PostgreSQL Operator and clusters
+make postgres-delete
+
+# View logs from PostgreSQL Operator and clusters
+make postgres-logs
+
+# Get the password for the default database user
+make postgres-password
+```
+
+### Connecting to PostgreSQL Clusters
+
+When deploying the API in Kubernetes with the PostgreSQL Operator, the database connection details are:
+
+- Host: `<cluster-name>.<namespace>.svc.cluster.local`
+- Port: `5432`
+- Database: `message_board`
+- User: `message_board_user`
+- Password: Retrieved from Kubernetes secret
+
+For example, to get the password:
+
+```bash
+kubectl get secret message-board-db.message-board-user.credentials -n web3 -o 'jsonpath={.data.password}' | base64 -d
+```
+
+### PostgreSQL Operator UI
+
+The PostgreSQL Operator includes a web UI for managing PostgreSQL clusters. Access it at:
+
+```
+http://postgres-ui.local
+```

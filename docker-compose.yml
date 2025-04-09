@@ -27,6 +27,9 @@ services:
     environment:
       - ENV=development
       - PORT=8080
+      # Use local database for development
+      # For Kubernetes deployment with PostgreSQL Operator, use secrets for credentials
+      # DB_HOST=${POSTGRES_OPERATOR_HOST:-"message-board-db"}.${NAMESPACE:-"web3"}.svc.cluster.local
       - DB_HOST=db
       - DB_PORT=5432
       - DB_NAME=message_board
@@ -35,6 +38,8 @@ services:
     depends_on:
       - db
 
+  # Local development database
+  # For Kubernetes deployment, this is replaced by the PostgreSQL Operator
   db:
     image: postgres:15-alpine
     volumes:
