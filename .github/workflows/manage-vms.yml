@@ -83,16 +83,16 @@ jobs:
           echo "Skipping apt-get update since we can't use sudo"
           echo "Assuming required dependencies are already installed on the runner"
 
+      - name: Verify Terraform is installed
+        run: |
+          terraform --version
+          echo "Using existing Terraform installation on the runner"
+
       - name: Configure hosts file for MinIO access
         run: |
           # Skip hosts file modification since we can't use sudo
           echo "Skipping hosts file modification since we can't use sudo"
           echo "Assuming MinIO hostname is already configured on the runner"
-
-      - name: Configure Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: 1.5.0
 
       - name: Set parameters based on mode
         id: params
