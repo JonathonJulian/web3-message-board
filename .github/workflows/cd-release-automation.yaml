@@ -380,36 +380,40 @@ jobs:
           ref: main
 
       - name: Download API artifacts
-        uses: dawidd6/action-download-artifact@v2
+        uses: dawidd6/action-download-artifact@v6
         with:
           workflow: cd-build-api.yaml
           workflow_conclusion: success
           name: api-binaries
           path: ./artifacts/api
+          allow_forks: false
 
       - name: Download Frontend artifacts
-        uses: dawidd6/action-download-artifact@v2
+        uses: dawidd6/action-download-artifact@v6
         with:
           workflow: cd-build-frontend.yaml
           workflow_conclusion: success
           name: frontend-bundle
           path: ./artifacts/frontend
+          allow_forks: false
 
       - name: Download Docker API artifacts
-        uses: dawidd6/action-download-artifact@v2
+        uses: dawidd6/action-download-artifact@v6
         with:
           workflow: cd-docker-build.yaml
           workflow_conclusion: success
           name: docker-build-api
           path: ./artifacts/docker-builds/api
+          allow_forks: false
 
       - name: Download Docker Frontend artifacts
-        uses: dawidd6/action-download-artifact@v2
+        uses: dawidd6/action-download-artifact@v6
         with:
           workflow: cd-docker-build.yaml
           workflow_conclusion: success
           name: docker-build-frontend
           path: ./artifacts/docker-builds/frontend
+          allow_forks: false
 
       - name: Verify all artifacts were downloaded successfully
         run: |
