@@ -90,13 +90,14 @@ resource "vsphere_virtual_machine" "vm" {
       "user-data"   = base64encode(templatefile(
         "${path.module}/templates/cloud-init.tftpl",
         {
-          vm_name       = each.value.name
-          network_type  = each.value.network_type
-          ip_address    = try(each.value.ip_address, "")
-          subnet_mask   = try(each.value.subnet_mask, "24")
-          gateway       = var.default_gateway
-          dns_servers   = var.dns_servers
-          search_domain = var.vm_domain
+          hostname     = each.value.name
+          domain       = var.vm_domain
+          network_type = each.value.network_type
+          ip_address   = try(each.value.ip_address, "")
+          subnet_mask  = try(each.value.subnet_mask, "24")
+          gateway      = var.default_gateway
+          dns_servers  = var.dns_servers
+          ssh_key      = var.ssh_public_key
         }
       ))
     }
@@ -108,7 +109,12 @@ resource "vsphere_virtual_machine" "vm" {
       num_cores_per_socket,
       annotation,
       ept_rvi_mode,
-      hv_mode
+      hv_mode,
+      guest_id,
+      scsi_controller_count,
+      scsi_type,
+      firmware,
+      pci_device_id
     ]
   }
 }
