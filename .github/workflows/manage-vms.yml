@@ -56,10 +56,10 @@ env:
   PROD_SSH_PUBLIC_KEY: ${{ github.event.inputs.ssh_public_key }}
 
   # For testing (non-main branches), use repository variables or defaults
-  TEST_ACTION: ${{ vars.TEST_ACTION || 'add' }}
-  TEST_VM_NAME: ${{ vars.TEST_VM_NAME || 'webserver' }}
+  TEST_ACTION: ${{ vars.TEST_ACTION || 'list' }}
+  TEST_VM_NAME: ${{ vars.TEST_VM_NAME || 'runner-1' }}
   TEST_NETWORK_TYPE: ${{ vars.TEST_NETWORK_TYPE || 'static' }}
-  TEST_IP_ADDRESS: ${{ vars.TEST_IP_ADDRESS || '192.168.1.201' }}
+  TEST_IP_ADDRESS: ${{ vars.TEST_IP_ADDRESS || '192.168.1.204' }}
   TEST_SUBNET_MASK: ${{ vars.TEST_SUBNET_MASK || '24' }}
   TEST_SSH_PUBLIC_KEY: ${{ vars.TEST_SSH_PUBLIC_KEY || 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO3sOFB9wGEcOgNO5BfxF35Sh+EAOxWTZjx//DK4XHAx jon@blocknative.com' }}
 
