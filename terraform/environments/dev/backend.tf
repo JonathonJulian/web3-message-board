@@ -13,10 +13,10 @@ terraform {
     # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
 
     # Required settings for MinIO
-    force_path_style            = true
+    use_path_style              = true
     skip_credentials_validation = true
     skip_metadata_api_check     = true
     skip_region_validation      = true
-    skip_requesting_account_id  = true  # Added this setting
+    skip_requesting_account_id  = true
   }
 }
