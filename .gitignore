@@ -79,3 +79,6 @@ node_modules/
 # Helm charts
 monitoring/charts/
 *.tgz
+
+# Specific files to exclude
+ansible/roles/github_actions_deps/tasks/main.yml
