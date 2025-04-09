@@ -244,6 +244,24 @@ jobs:
             --subnet-mask="$SUBNET_MASK" \
             --ssh-public-key="$SSH_PUBLIC_KEY"
 
+          # If we're adding a VM, make sure we also update all other VMs to have SSH keys for consistency
+          if [[ "$ACTION" == "add" || "$ACTION" == "apply" ]] && [[ -n "$SSH_PUBLIC_KEY" ]]; then
+            echo "Ensuring all VMs have SSH public keys set..."
+            # Extract all VM names
+            VM_NAMES=$(jq -r '.vm_configs | keys[]' ./terraform/environments/dev/terraform.tfvars.json)
+            for VM in $VM_NAMES; do
+              # Check if this VM already has an SSH key
+              HAS_KEY=$(jq -r ".vm_configs[\"$VM\"].ssh_public_key // \"\"" ./terraform/environments/dev/terraform.tfvars.json)
+              if [[ -z "$HAS_KEY" ]]; then
+                echo "Adding SSH key to VM '$VM'"
+                bash ./scripts/manage_vms.sh \
+                  --action="add" \
+                  --vm-name="$VM" \
+                  --ssh-public-key="$SSH_PUBLIC_KEY"
+              fi
+            done
+          fi
+
           # Always run apply after add/remove operations to apply the changes
           if [[ "$ACTION" == "add" || "$ACTION" == "remove" ]]; then
             echo "Running apply operation to apply configuration changes..."
