@@ -2,9 +2,14 @@ terraform {
   required_providers {
     vsphere = {
       source  = "hashicorp/vsphere"
-      version = "~> 2.11.1"
+      version = "~> 2.2.0"
+    }
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
     }
   }
+  required_version = ">= 1.1.0"
 }
 
 provider "vsphere" {
@@ -12,6 +17,26 @@ provider "vsphere" {
   password             = var.vsphere_password
   vsphere_server       = var.vsphere_server
   allow_unverified_ssl = true
+}
+
+# Configure AWS provider for S3 backend (MinIO)
+provider "aws" {
+  # These credentials will be supplied via environment variables:
+  # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+
+  # Settings for MinIO compatibility
+  s3_use_path_style           = true
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_requesting_account_id  = true
+
+  # MinIO endpoint
+  endpoints {
+    s3 = "http://minio.local"
+  }
+
+  # Required field but not used for MinIO
+  region = "us-east-1"
 }
 
 module "vsphere_vms" {
