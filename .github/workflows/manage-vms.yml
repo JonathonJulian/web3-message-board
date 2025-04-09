@@ -334,8 +334,8 @@ jobs:
           STATUS_ARRAY=()
 
           # Initial wait to give VMs time to boot
-          echo "Waiting 45 seconds for VMs to complete initialization..."
-          sleep 45
+          echo "Waiting 60 seconds for VMs to complete initialization..."
+          sleep 60
 
           # Loop through each VM
           for VM_KEY in $(echo "$VM_CONFIGS" | jq -r 'keys[]'); do
@@ -347,25 +347,39 @@ jobs:
 
               echo "Checking if VM $VM_NAME ($IP_ADDRESS) is online..."
 
-              # Simple ping test with basic parameters - similar to manual SSH approach
-              ping -c 5 "$IP_ADDRESS"
-              PING_EXIT=$?
-
-              if [ $PING_EXIT -eq 0 ]; then
-                echo "✅ VM $VM_NAME ($IP_ADDRESS) is responding to ping"
+              # Check SSH port (port 22) without requiring ping
+              echo "Attempting to connect to SSH port (22)..."
+              if timeout 5 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
+                echo "✅ VM $VM_NAME ($IP_ADDRESS) has SSH port open and is responsive"
                 STATUS="Online"
-
-                # Check SSH availability
-                if timeout 5 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
-                  SSH_STATUS="Available"
-                else
-                  SSH_STATUS="Port Closed"
-                fi
+                SSH_STATUS="Available"
               else
-                echo "❌ VM $VM_NAME ($IP_ADDRESS) not responding to ping"
-                echo "Note: VM may still be booting or ping may be blocked"
-                STATUS="Pending (No Ping)"
-                SSH_STATUS="Unknown"
+                echo "Initial SSH check failed, trying again with longer timeout..."
+
+                # Try more attempts with longer timeouts
+                MAX_ATTEMPTS=12
+                SUCCESS=false
+
+                for ((i=1; i<=MAX_ATTEMPTS; i++)); do
+                  echo "TCP connection attempt $i/$MAX_ATTEMPTS for $IP_ADDRESS:22..."
+                  if timeout 10 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
+                    echo "✅ VM $VM_NAME ($IP_ADDRESS) is online after $i attempts"
+                    STATUS="Online"
+                    SSH_STATUS="Available"
+                    SUCCESS=true
+                    break
+                  fi
+
+                  echo "Attempt $i/$MAX_ATTEMPTS: VM $VM_NAME ($IP_ADDRESS) not responding yet"
+                  sleep 15  # 15 seconds between attempts (total 3 minutes max)
+                done
+
+                if [[ "$SUCCESS" == "false" ]]; then
+                  echo "❌ Could not connect to VM $VM_NAME ($IP_ADDRESS)"
+                  echo "Note: VM may still be booting or port 22 may not be open yet"
+                  STATUS="Pending (No Connection)"
+                  SSH_STATUS="Unavailable"
+                fi
               fi
 
               # Generate SSH command
