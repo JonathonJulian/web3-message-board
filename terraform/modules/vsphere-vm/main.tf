@@ -90,22 +90,25 @@ resource "vsphere_virtual_machine" "vm" {
       "user-data"   = base64encode(templatefile(
         "${path.module}/templates/cloud-init.tftpl",
         {
-          hostname     = each.value.name
-          domain       = var.vm_domain
-          ssh_key      = var.ssh_public_key
-          network_type = lookup(each.value, "network_type", "dhcp")
-          ip_address   = lookup(each.value, "ip_address", null)
-          subnet_mask  = lookup(each.value, "subnet_mask", "24")
-          gateway      = var.default_gateway
-          dns_servers  = var.dns_servers
+          vm_name       = each.value.name
+          network_type  = each.value.network_type
+          ip_address    = try(each.value.ip_address, "")
+          subnet_mask   = try(each.value.subnet_mask, "24")
+          gateway       = var.default_gateway
+          dns_servers   = var.dns_servers
+          search_domain = var.vm_domain
         }
       ))
     }
   }
 
+  # Prevent unnecessary replacements and resource churn
   lifecycle {
     ignore_changes = [
-      vapp[0].properties,
+      num_cores_per_socket,
+      annotation,
+      ept_rvi_mode,
+      hv_mode
     ]
   }
 }
