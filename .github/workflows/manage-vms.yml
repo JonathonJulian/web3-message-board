@@ -1,0 +1,523 @@
+name: Manage vSphere VMs
+
+on:
+  push:
+    branches:
+      - '*'
+      - 'feature/vm-management-automation'  # Explicitly include our feature branch
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - add
+          - remove
+          - list
+          - apply
+        default: 'list'
+      vm_name:
+        description: 'VM name (identifier in configuration)'
+        required: false
+        type: string
+      network_type:
+        description: 'Network type'
+        required: false
+        type: choice
+        options:
+          - static
+          - dhcp
+        default: 'static'
+      ip_address:
+        description: 'IP address (required for static IP)'
+        required: false
+        type: string
+      subnet_mask:
+        description: 'Subnet mask (CIDR notation, e.g. "24")'
+        required: false
+        type: string
+        default: '24'
+      ssh_public_key:
+        description: 'SSH public key for the ubuntu user'
+        required: false
+        type: string
+
+env:
+  # Determine if we're in test mode based on branch (anything other than main/master)
+  IS_TEST_MODE: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
+  # For production (main branch), use the inputs
+  PROD_ACTION: ${{ github.event.inputs.action }}
+  PROD_VM_NAME: ${{ github.event.inputs.vm_name }}
+  PROD_NETWORK_TYPE: ${{ github.event.inputs.network_type }}
+  PROD_IP_ADDRESS: ${{ github.event.inputs.ip_address }}
+  PROD_SUBNET_MASK: ${{ github.event.inputs.subnet_mask }}
+  PROD_SSH_PUBLIC_KEY: ${{ github.event.inputs.ssh_public_key }}
+
+  # For testing (non-main branches), use repository variables or defaults
+  TEST_ACTION: ${{ vars.TEST_ACTION || 'remove' }}
+  TEST_VM_NAME: ${{ vars.TEST_VM_NAME || 'webserver' }}
+  TEST_NETWORK_TYPE: ${{ vars.TEST_NETWORK_TYPE || 'static' }}
+  TEST_IP_ADDRESS: ${{ vars.TEST_IP_ADDRESS || '192.168.1.204' }}
+  TEST_SUBNET_MASK: ${{ vars.TEST_SUBNET_MASK || '24' }}
+  TEST_SSH_PUBLIC_KEY: ${{ vars.TEST_SSH_PUBLIC_KEY || 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO3sOFB9wGEcOgNO5BfxF35Sh+EAOxWTZjx//DK4XHAx jon@blocknative.com' }}
+
+  # vSphere credentials from secrets
+  VSPHERE_SERVER: ${{ secrets.VSPHERE_SERVER }}
+  VSPHERE_USER: ${{ secrets.VSPHERE_USER }}
+  VSPHERE_PASSWORD: ${{ secrets.VSPHERE_PASSWORD }}
+
+  # MinIO configuration - from secrets or default values
+  MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT || 'http://minio.local' }}
+  MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY || 'minioadmin' }}
+  MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY || 'minioadmin' }}
+  MINIO_BUCKET: ${{ secrets.MINIO_BUCKET || 'terraform-state' }}
+  MINIO_OBJECT_PATH: "vm-configs.json"  # Changed from subfolder to file directly
+
+jobs:
+  manage-vms:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          # Skip system-level package installation
+          echo "Skipping apt-get update since we can't use sudo"
+          echo "Assuming required dependencies are already installed on the runner"
+
+      - name: Verify Terraform is installed
+        run: |
+          terraform --version
+          echo "Using existing Terraform installation on the runner"
+
+      - name: Set parameters based on mode
+        id: params
+        run: |
+          # Determine which set of parameters to use based on test mode
+          if [[ "${{ env.IS_TEST_MODE }}" == "true" ]]; then
+            echo "Using TEST mode parameters from repository variables"
+            echo "action=${{ env.TEST_ACTION }}" >> $GITHUB_OUTPUT
+            echo "vm_name=${{ env.TEST_VM_NAME }}" >> $GITHUB_OUTPUT
+            echo "network_type=${{ env.TEST_NETWORK_TYPE }}" >> $GITHUB_OUTPUT
+            echo "ip_address=${{ env.TEST_IP_ADDRESS }}" >> $GITHUB_OUTPUT
+            echo "subnet_mask=${{ env.TEST_SUBNET_MASK }}" >> $GITHUB_OUTPUT
+            echo "ssh_public_key=${{ env.TEST_SSH_PUBLIC_KEY }}" >> $GITHUB_OUTPUT
+          else
+            echo "Using PRODUCTION mode parameters from workflow inputs"
+            echo "action=${{ env.PROD_ACTION }}" >> $GITHUB_OUTPUT
+            echo "vm_name=${{ env.PROD_VM_NAME }}" >> $GITHUB_OUTPUT
+            echo "network_type=${{ env.PROD_NETWORK_TYPE }}" >> $GITHUB_OUTPUT
+            echo "ip_address=${{ env.PROD_IP_ADDRESS }}" >> $GITHUB_OUTPUT
+            echo "subnet_mask=${{ env.PROD_SUBNET_MASK }}" >> $GITHUB_OUTPUT
+            echo "ssh_public_key=${{ env.PROD_SSH_PUBLIC_KEY }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Pull VM configurations from MinIO
+        id: pull_configs
+        run: |
+          # Create the destination directory
+          mkdir -p ./terraform/environments/dev
+
+          # Configure MinIO client with proper alias
+          echo "Configuring MinIO client..."
+          mc alias set myminio http://minio.local minioadmin minioadmin
+
+          # Verify MinIO connectivity and debug output
+          echo "Testing MinIO connectivity..."
+          mc ls myminio/ || echo "Failed to list MinIO root"
+
+          echo "Listing terraform-state bucket contents..."
+          mc ls myminio/terraform-state/ || echo "Failed to list bucket contents"
+
+          # Pull configurations from MinIO using temporary file first
+          echo "Pulling configurations from MinIO..."
+          TEMP_FILE="/tmp/terraform.tfvars.json"
+          FINAL_PATH="$(pwd)/terraform/environments/dev/terraform.tfvars.json"
+
+          if mc cp myminio/terraform-state/vm-configs.json "$TEMP_FILE"; then
+            echo "Successfully downloaded from MinIO"
+            cp "$TEMP_FILE" "$FINAL_PATH"
+          else
+            echo "Failed to copy from MinIO, creating default configuration..."
+            echo '{"vm_configs": {}}' > "$FINAL_PATH"
+          fi
+
+          # Display the current configurations
+          echo "Current VM configurations:"
+          cat ./terraform/environments/dev/terraform.tfvars.json | jq .
+
+      - name: Run VM management script
+        id: vm_management
+        run: |
+          # Make the script executable
+          chmod +x ./scripts/manage_vms.sh
+
+          # Get parameters from previous step
+          ACTION="${{ steps.params.outputs.action }}"
+          VM_NAME="${{ steps.params.outputs.vm_name }}"
+          NETWORK_TYPE="${{ steps.params.outputs.network_type }}"
+          IP_ADDRESS="${{ steps.params.outputs.ip_address }}"
+          SUBNET_MASK="${{ steps.params.outputs.subnet_mask }}"
+          SSH_PUBLIC_KEY="${{ steps.params.outputs.ssh_public_key }}"
+
+          # Check if IP is already in use and find a free one if needed
+          if [[ "$NETWORK_TYPE" == "static" && "$ACTION" == "add" ]]; then
+            echo "Checking if IP $IP_ADDRESS is available..."
+
+            # Extract the base IP prefix (first 3 octets)
+            IP_PREFIX=$(echo "$IP_ADDRESS" | cut -d. -f1-3)
+            IP_LAST_OCTET=$(echo "$IP_ADDRESS" | cut -d. -f4)
+
+            # Try pinging the IP to check if it's in use
+            ATTEMPTS=0
+            MAX_ATTEMPTS=50  # Don't try more than 50 IPs (octet max is 254)
+            CURRENT_IP="$IP_ADDRESS"
+            CURRENT_OCTET="$IP_LAST_OCTET"
+
+            while ping -c 1 -W 1 "$CURRENT_IP" &>/dev/null && [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+              echo "IP $CURRENT_IP is already in use. Trying next IP..."
+              ATTEMPTS=$((ATTEMPTS + 1))
+              CURRENT_OCTET=$((CURRENT_OCTET + 1))
+
+              # Ensure we stay in valid IP range (1-254)
+              if [ $CURRENT_OCTET -gt 254 ]; then
+                echo "Warning: Reached end of IP range. Wrapping around to start."
+                CURRENT_OCTET=1
+              fi
+
+              CURRENT_IP="${IP_PREFIX}.${CURRENT_OCTET}"
+            done
+
+            if [ $ATTEMPTS -ge $MAX_ATTEMPTS ]; then
+              echo "Error: Could not find an available IP after $MAX_ATTEMPTS attempts."
+              exit 1
+            fi
+
+            if [ "$CURRENT_IP" != "$IP_ADDRESS" ]; then
+              echo "Original IP $IP_ADDRESS was in use. Using $CURRENT_IP instead."
+              IP_ADDRESS="$CURRENT_IP"
+            else
+              echo "IP $IP_ADDRESS is available. Proceeding with deployment."
+            fi
+          fi
+
+          # Set vSphere credentials as Terraform environment variables
+          export TF_VAR_vsphere_user="${{ secrets.VSPHERE_USER }}"
+          export TF_VAR_vsphere_password="${{ secrets.VSPHERE_PASSWORD }}"
+          export TF_VAR_vsphere_server="${{ secrets.VSPHERE_SERVER }}"
+          export TF_VAR_ssh_public_key="$SSH_PUBLIC_KEY"
+
+          # Set govc environment variables for vSphere API access
+          export GOVC_URL="https://${{ secrets.VSPHERE_SERVER }}"
+          export GOVC_USERNAME="${{ secrets.VSPHERE_USER }}"
+          export GOVC_PASSWORD="${{ secrets.VSPHERE_PASSWORD }}"
+          export GOVC_INSECURE=true  # Skip certificate verification for lab environments
+          
+          # Set MinIO S3 credentials for Terraform backend (explicitly naming both AWS and original variables)
+          export AWS_ACCESS_KEY_ID="${{ secrets.MINIO_ACCESS_KEY || env.MINIO_ACCESS_KEY }}"
+          export AWS_SECRET_ACCESS_KEY="${{ secrets.MINIO_SECRET_KEY || env.MINIO_SECRET_KEY }}"
+          # MinIO-specific environment variables as backup
+          export MINIO_ACCESS_KEY="${{ secrets.MINIO_ACCESS_KEY || env.MINIO_ACCESS_KEY }}"
+          export MINIO_SECRET_KEY="${{ secrets.MINIO_SECRET_KEY || env.MINIO_SECRET_KEY }}"
+
+          # Set other required AWS variables to prevent credential lookup
+          export AWS_REGION="us-east-1"
+          export AWS_DEFAULT_REGION="us-east-1"
+          export AWS_EC2_METADATA_DISABLED="true"  # Prevent EC2 metadata lookup
+
+          echo "Running with: ACTION=$ACTION, VM_NAME=$VM_NAME, NETWORK_TYPE=$NETWORK_TYPE"
+          if [[ "$NETWORK_TYPE" == "static" ]]; then
+            echo "Static IP: $IP_ADDRESS/$SUBNET_MASK"
+          fi
+          echo "Using SSH public key: $SSH_PUBLIC_KEY"
+
+          # First initialize Terraform with upgrade to handle provider version changes
+          echo "Initializing Terraform with provider upgrades..."
+          cd terraform/environments/dev
+          terraform init -upgrade
+
+          # Run manage_vms.sh script with parameters
+          cd ../../../
+          bash ./scripts/manage_vms.sh \
+            --action="$ACTION" \
+            --vm-name="$VM_NAME" \
+            --network-type="$NETWORK_TYPE" \
+            --ip-address="$IP_ADDRESS" \
+            --subnet-mask="$SUBNET_MASK" \
+            --ssh-public-key="$SSH_PUBLIC_KEY"
+
+          # If we're adding a VM, make sure we also update all other VMs to have SSH keys for consistency
+          if [[ "$ACTION" == "add" || "$ACTION" == "apply" ]] && [[ -n "$SSH_PUBLIC_KEY" ]]; then
+            echo "Ensuring all VMs have SSH public keys set..."
+            # Extract all VM names
+            VM_NAMES=$(jq -r '.vm_configs | keys[]' ./terraform/environments/dev/terraform.tfvars.json)
+            for VM in $VM_NAMES; do
+              # Check if this VM already has an SSH key
+              HAS_KEY=$(jq -r ".vm_configs[\"$VM\"].ssh_public_key // \"\"" ./terraform/environments/dev/terraform.tfvars.json)
+              if [[ -z "$HAS_KEY" ]]; then
+                echo "Adding SSH key to VM '$VM'"
+                bash ./scripts/manage_vms.sh \
+                  --action="add" \
+                  --vm-name="$VM" \
+                  --ssh-public-key="$SSH_PUBLIC_KEY"
+              fi
+            done
+          fi
+
+          # Always run apply after add/remove operations to apply the changes
+          if [[ "$ACTION" == "add" || "$ACTION" == "remove" ]]; then
+            echo "Running apply operation to apply configuration changes..."
+            bash ./scripts/manage_vms.sh --action=apply
+          fi
+
+          # Save VM configurations for next steps
+          if [[ -f "./terraform/environments/dev/terraform.tfvars.json" ]]; then
+            echo "Copying configuration for later steps..."
+            cp ./terraform/environments/dev/terraform.tfvars.json /tmp/vm_configs.json
+
+            # Push updated config back to MinIO
+            echo "Pushing updated configuration back to MinIO..."
+            TEMP_FILE="/tmp/terraform-updated.tfvars.json"
+            cp ./terraform/environments/dev/terraform.tfvars.json "$TEMP_FILE"
+
+            # Configure MinIO client again in case this is a separate shell session
+            echo "Configuring MinIO client for push operation..."
+            mc alias set myminio "${{ secrets.MINIO_ENDPOINT || env.MINIO_ENDPOINT }}" "${{ secrets.MINIO_ACCESS_KEY || env.MINIO_ACCESS_KEY }}" "${{ secrets.MINIO_SECRET_KEY || env.MINIO_SECRET_KEY }}"
+
+            # Verify MinIO connectivity before push
+            echo "Verifying MinIO connectivity..."
+            if ! mc ls myminio/ &>/dev/null; then
+              echo "ERROR: Unable to connect to MinIO server at ${{ secrets.MINIO_ENDPOINT || env.MINIO_ENDPOINT }}"
+              echo "MinIO connection test failed. Check hostname, credentials, and network connectivity."
+              echo "Will save configuration locally but not push to MinIO."
+              echo "MINIO_PUSH_STATUS=failed" >> $GITHUB_ENV
+            else
+              echo "MinIO connection successful. Proceeding with push operation."
+
+              # Verify bucket exists
+              echo "Verifying bucket exists: ${{ env.MINIO_BUCKET }}"
+              if ! mc ls myminio/"${{ env.MINIO_BUCKET }}/" &>/dev/null; then
+                echo "Bucket doesn't exist, attempting to create it..."
+                mc mb myminio/"${{ env.MINIO_BUCKET }}/" || {
+                  echo "ERROR: Failed to create bucket ${{ env.MINIO_BUCKET }}"
+                  echo "MINIO_PUSH_STATUS=failed" >> $GITHUB_ENV
+                }
+              fi
+
+              # Push the configuration
+              echo "Pushing configuration to myminio/${{ env.MINIO_BUCKET }}/${{ env.MINIO_OBJECT_PATH }}..."
+              if mc cp "$TEMP_FILE" myminio/"${{ env.MINIO_BUCKET }}"/"${{ env.MINIO_OBJECT_PATH }}"; then
+                echo "Successfully pushed configuration to MinIO"
+                echo "MINIO_PUSH_STATUS=success" >> $GITHUB_ENV
+              else
+                echo "ERROR: Failed to push configuration to MinIO"
+                echo "MINIO_PUSH_STATUS=failed" >> $GITHUB_ENV
+              fi
+            fi
+
+            echo "CONFIGS_SAVED=true" >> $GITHUB_ENV
+          else
+            echo "CONFIGS_SAVED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Wait for VMs to come online and verify accessibility
+        if: |
+          env.CONFIGS_SAVED == 'true' &&
+          (steps.params.outputs.action == 'add' || steps.params.outputs.action == 'apply')
+        id: wait_for_vms
+        run: |
+          # Create a status file for the summary
+          echo '[]' > /tmp/vm_status.json
+
+          # Get VM configurations
+          VM_CONFIGS=$(jq -r '.vm_configs' /tmp/vm_configs.json)
+
+          # Initialize status array
+          STATUS_ARRAY=()
+
+          # Initial wait to give VMs time to boot
+          echo "Waiting 60 seconds for VMs to complete initialization..."
+          sleep 60
+
+          # Loop through each VM
+          for VM_KEY in $(echo "$VM_CONFIGS" | jq -r 'keys[]'); do
+            VM_NAME=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].name")
+            NETWORK_TYPE=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].network_type")
+
+            if [[ "$NETWORK_TYPE" == "static" ]]; then
+              IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address")
+
+              echo "Checking if VM $VM_NAME ($IP_ADDRESS) is online..."
+
+              # Check SSH port (port 22) without requiring ping
+              echo "Attempting to connect to SSH port (22)..."
+              if timeout 5 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
+                echo "✅ VM $VM_NAME ($IP_ADDRESS) has SSH port open and is responsive"
+                STATUS="Online"
+                SSH_STATUS="Available"
+              else
+                echo "Initial SSH check failed, trying again with longer timeout..."
+
+                # Try more attempts with longer timeouts
+                MAX_ATTEMPTS=12
+                SUCCESS=false
+
+                for ((i=1; i<=MAX_ATTEMPTS; i++)); do
+                  echo "TCP connection attempt $i/$MAX_ATTEMPTS for $IP_ADDRESS:22..."
+                  if timeout 10 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
+                    echo "✅ VM $VM_NAME ($IP_ADDRESS) is online after $i attempts"
+                    STATUS="Online"
+                    SSH_STATUS="Available"
+                    SUCCESS=true
+                    break
+                  fi
+
+                  echo "Attempt $i/$MAX_ATTEMPTS: VM $VM_NAME ($IP_ADDRESS) not responding yet"
+                  sleep 15  # 15 seconds between attempts (total 3 minutes max)
+                done
+
+                if [[ "$SUCCESS" == "false" ]]; then
+                  echo "❌ Could not connect to VM $VM_NAME ($IP_ADDRESS)"
+                  echo "Note: VM may still be booting or port 22 may not be open yet"
+                  STATUS="Pending (No Connection)"
+                  SSH_STATUS="Unavailable"
+                fi
+              fi
+
+              # Generate SSH command
+              SSH_COMMAND="ssh ubuntu@$IP_ADDRESS"
+
+              # Add to status array for summary
+              STATUS_ARRAY+=("$(jq -n \
+                --arg name "$VM_NAME" \
+                --arg key "$VM_KEY" \
+                --arg ip "$IP_ADDRESS" \
+                --arg status "$STATUS" \
+                --arg ssh_status "$SSH_STATUS" \
+                --arg ssh_command "$SSH_COMMAND" \
+                '{name: $name, key: $key, ip: $ip, status: $status, ssh_status: $ssh_status, ssh_command: $ssh_command}')")
+            else
+              # For DHCP VMs, we can't easily check status
+              STATUS_ARRAY+=("$(jq -n \
+                --arg name "$VM_NAME" \
+                --arg key "$VM_KEY" \
+                --arg ip "DHCP" \
+                --arg status "Unknown (DHCP)" \
+                --arg ssh_status "Unknown" \
+                --arg ssh_command "N/A - DHCP" \
+                '{name: $name, key: $key, ip: $ip, status: $status, ssh_status: $ssh_status, ssh_command: $ssh_command}')")
+            fi
+          done
+
+          # Combine status objects into JSON array and save - fixed to properly format JSON
+          # Instead of concatenating strings, use jq to properly build the array
+          echo '[]' > /tmp/vm_status.json
+          for item in "${STATUS_ARRAY[@]}"; do
+            # Add each item to the array one at a time using jq
+            jq --argjson item "$item" '. += [$item]' /tmp/vm_status.json > /tmp/vm_status.json.tmp
+            mv /tmp/vm_status.json.tmp /tmp/vm_status.json
+          done
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "# VM Management Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Action Performed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get the action and parameters from the params step
+          ACTION="${{ steps.params.outputs.action }}"
+          VM_NAME="${{ steps.params.outputs.vm_name }}"
+          NETWORK_TYPE="${{ steps.params.outputs.network_type }}"
+          IP_ADDRESS="${{ steps.params.outputs.ip_address }}"
+          SUBNET_MASK="${{ steps.params.outputs.subnet_mask }}"
+          SSH_PUBLIC_KEY="${{ steps.params.outputs.ssh_public_key }}"
+
+          echo "- **Mode:** \`${{ env.IS_TEST_MODE == 'true' && 'TEST' || 'PRODUCTION' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Action:** \`$ACTION\`" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "$ACTION" == "add" ]]; then
+            echo "- **VM Added:** \`$VM_NAME\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Network Type:** \`$NETWORK_TYPE\`" >> $GITHUB_STEP_SUMMARY
+            if [[ "$NETWORK_TYPE" == "static" ]]; then
+              echo "- **IP Address:** \`$IP_ADDRESS/$SUBNET_MASK\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          elif [[ "$ACTION" == "remove" ]]; then
+            echo "- **VM Removed:** \`$VM_NAME\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Add current VM status if available
+          if [[ -f "/tmp/vm_status.json" ]]; then
+            echo "## Current VMs" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| VM Key | Name | IP Address | Status | SSH | Access Command |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|------|------------|--------|-----|---------------|" >> $GITHUB_STEP_SUMMARY
+
+            # Process the status file with better error handling
+            if jq -e . /tmp/vm_status.json > /dev/null 2>&1; then
+              # Process the status file and add each VM to the table
+              jq -r '.[] | "| \(.key) | \(.name) | \(.ip) | \(.status) | \(.ssh_status) | `\(.ssh_command)` |"' /tmp/vm_status.json >> $GITHUB_STEP_SUMMARY || {
+                echo "| ⚠️ Error | Error processing status file | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
+                echo "Error details: Invalid JSON format in status file" >> $GITHUB_STEP_SUMMARY
+              }
+            else
+              echo "| ⚠️ Error | Error processing status file | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
+              echo "Error details: Invalid JSON format in status file" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Access Instructions" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "For VMs with SSH available:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Make sure you have the appropriate SSH key configured" >> $GITHUB_STEP_SUMMARY
+            echo "2. Use the access command shown in the table above" >> $GITHUB_STEP_SUMMARY
+
+          elif [[ "${{ env.CONFIGS_SAVED }}" == "true" ]]; then
+            echo "## Current VM Configurations" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| VM Key | Name | Network Type | IP Address |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|------|-------------|------------|" >> $GITHUB_STEP_SUMMARY
+
+            # Process the configurations with better error handling
+            if [[ -f "/tmp/vm_configs.json" ]] && jq -e . /tmp/vm_configs.json > /dev/null 2>&1; then
+              # Process the configurations and add each VM to the table
+              VM_CONFIGS=$(jq -r '.vm_configs' /tmp/vm_configs.json)
+              for VM_KEY in $(echo "$VM_CONFIGS" | jq -r 'keys[]' 2>/dev/null || echo ""); do
+                if [[ -n "$VM_KEY" ]]; then
+                  VM_NAME=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].name" 2>/dev/null || echo "Unknown")
+                  NETWORK_TYPE=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].network_type" 2>/dev/null || echo "Unknown")
+                  if [[ "$NETWORK_TYPE" == "static" ]]; then
+                    IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address" 2>/dev/null || echo "Unknown")
+                    SUBNET_MASK=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].subnet_mask // \"24\"" 2>/dev/null || echo "24")
+                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | $IP_ADDRESS/$SUBNET_MASK |" >> $GITHUB_STEP_SUMMARY
+                  else
+                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | DHCP |" >> $GITHUB_STEP_SUMMARY
+                  fi
+                fi
+              done
+            else
+              echo "| ⚠️ Error | Error processing configuration file | - | - |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "No VM configurations found." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## MinIO Configuration Storage" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "VM configurations are stored in MinIO at:" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL:** \`${{ env.MINIO_ENDPOINT }}/${{ env.MINIO_BUCKET }}/${{ env.MINIO_OBJECT_PATH }}\`" >> $GITHUB_STEP_SUMMARY
+
+          # Add push status if available
+          if [[ "${{ env.MINIO_PUSH_STATUS }}" == "success" ]]; then
+            echo "- **Status:** ✅ Successfully pushed to MinIO" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ env.MINIO_PUSH_STATUS }}" == "failed" ]]; then
+            echo "- **Status:** ❌ Failed to push to MinIO" >> $GITHUB_STEP_SUMMARY
+          fi

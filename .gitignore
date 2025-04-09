@@ -29,15 +29,19 @@ go.work.sum
 Thumbs.db
 
 # Terraform
-terraform/.terraform/
-terraform/.terraform.lock.hcl
-terraform/.terraform/**
-terraform/**/*.terraform/**
-terraform/*.tfstate
-terraform/*.tfstate.*
-terraform/*.tfvars
-terraform/tfplan
-terraform/*.ova
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
 
 # Large binaries
 *.ova
@@ -75,3 +79,6 @@ node_modules/
 # Helm charts
 monitoring/charts/
 *.tgz
+
+# Specific files to exclude
+ansible/roles/github_actions_deps/tasks/main.yml

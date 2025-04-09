@@ -32,6 +32,10 @@ help:
 	@echo "  loki-delete      - Delete only Loki component"
 	@echo "  minio-deploy     - Deploy only MinIO component"
 	@echo "  minio-delete     - Delete only MinIO component"
+	@echo "  postgres-deploy  - Deploy PostgreSQL operator"
+	@echo "  postgres-delete  - Delete PostgreSQL operator deployment"
+	@echo "  postgres-cluster-create - Create a PostgreSQL cluster using the operator"
+	@echo "  postgres-ui-deploy - Deploy only PostgreSQL operator UI"
 	@echo "  monitoring-logs  - View logs from monitoring stack components"
 	@echo "  monitoring-port-forward - Set up port forwarding for Grafana and MinIO"
 	@echo "  ansible-deploy   - Run Ansible playbook to configure servers"
@@ -512,3 +516,98 @@ loki-path-test:
 
 	@echo "\n4. Trying http://loki.local/api/v1/query:"
 	@curl -s -G "http://loki.local/api/v1/query" --data-urlencode 'query={}' | grep -q "result" && echo "✅ Succeeded" || echo "❌ Failed"
+
+# PostgreSQL Operator Deployment
+.PHONY: postgres-deploy
+postgres-deploy: helm-setup
+	@echo "Deploying PostgreSQL Operator directly with Helm..."
+	helm repo add postgres-operator-charts https://opensource.zalando.com/postgres-operator/charts/postgres-operator || true
+	helm repo add postgres-operator-ui-charts https://opensource.zalando.com/postgres-operator/charts/postgres-operator-ui || true
+	helm repo update
+	helm upgrade --install postgres-operator postgres-operator-charts/postgres-operator \
+		--namespace $(HELM_NAMESPACE) \
+		--create-namespace \
+		--wait
+	helm upgrade --install postgres-operator-ui postgres-operator-ui-charts/postgres-operator-ui \
+		--namespace $(HELM_NAMESPACE) \
+		--create-namespace \
+		--wait
+	@echo "PostgreSQL Operator has been deployed successfully!"
+	@echo "You can access the PostgreSQL Operator UI at: http://postgres-ui.local (after setting up ingress)"
+
+.PHONY: postgres-delete
+postgres-delete:
+	@echo "Deleting PostgreSQL Operator..."
+	helm uninstall postgres-operator -n $(HELM_NAMESPACE) || true
+	helm uninstall postgres-operator-ui -n $(HELM_NAMESPACE) || true
+	kubectl delete postgresql --all -n $(HELM_NAMESPACE) || true
+
+.PHONY: postgres-ui-deploy
+postgres-ui-deploy: helm-setup
+	@echo "Deploying PostgreSQL Operator UI only..."
+	helm repo add postgres-operator-ui-charts https://opensource.zalando.com/postgres-operator/charts/postgres-operator-ui || true
+	helm repo update
+	helm upgrade --install postgres-operator-ui postgres-operator-ui-charts/postgres-operator-ui \
+		--namespace $(HELM_NAMESPACE) \
+		--create-namespace \
+		--wait
+	@echo "PostgreSQL Operator UI has been deployed successfully!"
+
+.PHONY: postgres-cluster-create
+postgres-cluster-create:
+	@echo "Creating PostgreSQL cluster using the operator..."
+	@echo "Creating a template for message-board-db cluster..."
+	@echo 'apiVersion: "acid.zalan.do/v1"' > /tmp/message-board-db.yaml
+	@echo 'kind: postgresql' >> /tmp/message-board-db.yaml
+	@echo 'metadata:' >> /tmp/message-board-db.yaml
+	@echo '  name: message-board-db' >> /tmp/message-board-db.yaml
+	@echo '  namespace: $(HELM_NAMESPACE)' >> /tmp/message-board-db.yaml
+	@echo 'spec:' >> /tmp/message-board-db.yaml
+	@echo '  teamId: "web3"' >> /tmp/message-board-db.yaml
+	@echo '  volume:' >> /tmp/message-board-db.yaml
+	@echo '    size: 10Gi' >> /tmp/message-board-db.yaml
+	@echo '    storageClass: "local-storage"' >> /tmp/message-board-db.yaml
+	@echo '  numberOfInstances: 2' >> /tmp/message-board-db.yaml
+	@echo '  users:' >> /tmp/message-board-db.yaml
+	@echo '    message_board_user:' >> /tmp/message-board-db.yaml
+	@echo '      - superuser' >> /tmp/message-board-db.yaml
+	@echo '      - createdb' >> /tmp/message-board-db.yaml
+	@echo '  databases:' >> /tmp/message-board-db.yaml
+	@echo '    message_board: message_board_user' >> /tmp/message-board-db.yaml
+	@echo '  postgresql:' >> /tmp/message-board-db.yaml
+	@echo '    version: "15"' >> /tmp/message-board-db.yaml
+	@echo '    parameters:' >> /tmp/message-board-db.yaml
+	@echo '      shared_buffers: "128MB"' >> /tmp/message-board-db.yaml
+	@echo '      max_connections: "100"' >> /tmp/message-board-db.yaml
+	@echo '      work_mem: "4MB"' >> /tmp/message-board-db.yaml
+	@echo '  resources:' >> /tmp/message-board-db.yaml
+	@echo '    requests:' >> /tmp/message-board-db.yaml
+	@echo '      cpu: 100m' >> /tmp/message-board-db.yaml
+	@echo '      memory: 256Mi' >> /tmp/message-board-db.yaml
+	@echo '    limits:' >> /tmp/message-board-db.yaml
+	@echo '      cpu: 500m' >> /tmp/message-board-db.yaml
+	@echo '      memory: 1Gi' >> /tmp/message-board-db.yaml
+	@echo '  podAnnotations:' >> /tmp/message-board-db.yaml
+	@echo '    prometheus.io/scrape: "true"' >> /tmp/message-board-db.yaml
+	@echo '    prometheus.io/port: "9187"' >> /tmp/message-board-db.yaml
+	kubectl apply -f /tmp/message-board-db.yaml
+	@echo "PostgreSQL cluster creation initiated. It may take several minutes to complete."
+	@echo "Check the status with: kubectl get postgresql -n $(HELM_NAMESPACE)"
+
+.PHONY: postgres-logs
+postgres-logs:
+	@echo "Viewing logs from PostgreSQL Operator and clusters..."
+	kubectl logs -n $(HELM_NAMESPACE) -l app.kubernetes.io/name=postgres-operator --tail=20
+	@echo "PostgreSQL cluster logs (if exists):"
+	kubectl logs -n $(HELM_NAMESPACE) -l application=spilo --tail=20 || echo "No PostgreSQL cluster logs found"
+
+.PHONY: postgres-password
+postgres-password:
+	@echo "Getting password for the PostgreSQL message_board_user:"
+	@CLUSTER=$$(kubectl get postgresql -n $(HELM_NAMESPACE) -o name | head -n1 | awk -F/ '{print $$2}') && \
+	if [ -n "$$CLUSTER" ]; then \
+		echo "Credentials for cluster: $$CLUSTER" && \
+		kubectl get secret $$CLUSTER.message-board-user.credentials -n $(HELM_NAMESPACE) -o 'jsonpath={.data.password}' | base64 -d && echo ""; \
+	else \
+		echo "No PostgreSQL clusters found in namespace $(HELM_NAMESPACE)"; \
+	fi

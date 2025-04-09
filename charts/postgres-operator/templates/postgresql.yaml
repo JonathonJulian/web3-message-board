@@ -1,0 +1,34 @@
+{{- if .Values.createCluster }}
+apiVersion: "acid.zalan.do/v1"
+kind: postgresql
+metadata:
+  name: {{ .Values.clusterName | default "message-board-db" }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  teamId: "web3"
+  volume:
+    size: {{ .Values.volumeSize | default "10Gi" }}
+  numberOfInstances: {{ .Values.replicas | default 2 }}
+  users:
+    message_board_user:
+      - superuser
+      - createdb
+  databases:
+    message_board: message_board_user
+  postgresql:
+    version: "15"
+    parameters:
+      shared_buffers: "128MB"
+      max_connections: "100"
+      work_mem: "4MB"
+  resources:
+    requests:
+      cpu: {{ .Values.resources.requests.cpu | default "100m" }}
+      memory: {{ .Values.resources.requests.memory | default "256Mi" }}
+    limits:
+      cpu: {{ .Values.resources.limits.cpu | default "500m" }}
+      memory: {{ .Values.resources.limits.memory | default "1Gi" }}
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+{{- end }}
