@@ -114,11 +114,23 @@ jobs:
           # Create the destination directory
           mkdir -p ./terraform/environments/dev
 
-          # Pull configurations from MinIO using the working command
-          mc cp myminio/terraform-state/vm-configs.json ./terraform/environments/dev/terraform.tfvars.json
+          # Verify MinIO connectivity and debug output
+          echo "Testing MinIO connectivity..."
+          mc ls myminio/
+
+          echo "Listing terraform-state bucket contents..."
+          mc ls myminio/terraform-state/ || echo "Failed to list bucket contents"
+
+          # Pull configurations from MinIO using absolute path for destination
+          echo "Pulling configurations from MinIO..."
+          DEST_PATH="$(pwd)/terraform/environments/dev/terraform.tfvars.json"
+          mc cp myminio/terraform-state/vm-configs.json "$DEST_PATH" || {
+            echo "Failed to copy from MinIO, creating default configuration..."
+            echo '{"vm_configs": {}}' > "$DEST_PATH"
+          }
 
           # Display the current configurations
-          echo "Current VM configurations (pulled from MinIO):"
+          echo "Current VM configurations:"
           cat ./terraform/environments/dev/terraform.tfvars.json | jq .
 
       - name: Run VM management script
@@ -174,11 +186,17 @@ jobs:
 
           # Save VM configurations for next steps
           if [[ -f "./terraform/environments/dev/terraform.tfvars.json" ]]; then
+            echo "Copying configuration for later steps..."
             cp ./terraform/environments/dev/terraform.tfvars.json /tmp/vm_configs.json
 
             # Push updated config back to MinIO
             echo "Pushing updated configuration back to MinIO..."
-            mc cp ./terraform/environments/dev/terraform.tfvars.json myminio/terraform-state/vm-configs.json
+            SOURCE_PATH="$(pwd)/terraform/environments/dev/terraform.tfvars.json"
+            if [[ -f "$SOURCE_PATH" ]]; then
+              mc cp "$SOURCE_PATH" myminio/terraform-state/vm-configs.json || echo "Failed to push to MinIO, but continuing"
+            else
+              echo "Warning: Configuration file not found for pushing to MinIO"
+            fi
 
             echo "CONFIGS_SAVED=true" >> $GITHUB_ENV
           else
