@@ -6,7 +6,9 @@ NAMESPACE=${NAMESPACE:-"web3"}
 RELEASE_NAME_MINIO=${RELEASE_NAME_MINIO:-"minio-storage"}
 RELEASE_NAME_LOKI=${RELEASE_NAME_LOKI:-"loki-stack"}
 RELEASE_NAME_PG=${RELEASE_NAME_PG:-"postgres-operator"}
+RELEASE_NAME_VL=${RELEASE_NAME_VL:-"victoria-logs"}
 DEPLOY_PG=${DEPLOY_PG:-"false"}
+DEPLOY_VL=${DEPLOY_VL:-"false"}
 
 # Create namespace if it doesn't exist
 kubectl get namespace $NAMESPACE > /dev/null 2>&1 || kubectl create namespace $NAMESPACE
@@ -38,6 +40,13 @@ if [ "$DEPLOY_PG" = "true" ]; then
   cd ..
 fi
 
+# Step 6: Deploy Victoria Logs if enabled
+if [ "$DEPLOY_VL" = "true" ]; then
+  echo "Deploying Victoria Logs..."
+  cd victoria-logs && ./deploy-victoria-logs.sh
+  cd ..
+fi
+
 echo "Deployment completed successfully!"
 echo ""
 echo "You can access the following services:"
@@ -46,4 +55,7 @@ echo "- Grafana: http://grafana.local"
 echo "- Loki: http://loki.local"
 if [ "$DEPLOY_PG" = "true" ]; then
   echo "- PostgreSQL Operator UI: http://postgres-ui.local"
+fi
+if [ "$DEPLOY_VL" = "true" ]; then
+  echo "- Victoria Logs: http://victoria-logs.local"
 fi

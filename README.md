@@ -607,3 +607,54 @@ The PostgreSQL Operator includes a web UI for managing PostgreSQL clusters. Acce
 ```
 http://postgres-ui.local
 ```
+
+## Logging Systems
+
+The project supports multiple logging systems for performance comparison:
+
+### Loki
+
+[Loki](https://grafana.com/oss/loki/) is the default logging system, providing:
+- Label-based log indexing
+- Integration with Grafana for querying
+- Efficient log storage with low resource usage
+
+### Victoria Logs
+
+[Victoria Logs](https://victoriametrics.com/products/victoria-logs/) is an alternative high-performance logging system:
+- SQL-like query language for logs
+- High ingest rates with low resource consumption
+- Label-based indexing compatible with Loki
+
+### Deploying Logging Systems
+
+To deploy and compare the logging systems:
+
+```bash
+# Deploy Loki (default)
+make charts-deploy
+
+# Deploy Victoria Logs
+make victoria-logs-deploy
+
+# View Loki logs
+make loki-logs
+
+# View Victoria Logs
+make victoria-logs-logs
+
+# Compare performance metrics
+make logging-comparison
+
+# Delete Victoria Logs
+make victoria-logs-delete
+```
+
+### Comparing Logging Systems
+
+Both systems have their strengths:
+
+- **Loki**: Lower memory footprint, better Grafana integration
+- **Victoria Logs**: Higher ingest rates, SQL-like querying, better compression
+
+The `make logging-comparison` command provides metrics to compare their performance in your environment.

@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-victoria-logs
+  labels:
+    app: {{ .Release.Name }}-victoria-logs
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-victoria-logs
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-victoria-logs
+    spec:
+      containers:
+        - name: victoria-logs
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "-retentionPeriod={{ .Values.config.retentionPeriod }}"
+            - "-maxDiskUsagePerSearch={{ .Values.config.maxDiskUsagePerSearch }}"
+            - "-loggerDisableTimestamps={{ .Values.config.loggerDisableTimestamps }}"
+            - "-loggerFormat={{ .Values.config.loggerFormat }}"
+            - "-httpListenAddr={{ .Values.config.httpListenAddr }}"
+            - "-storageDataPath=/victoria-logs-data"
+          ports:
+            - name: http
+              containerPort: 9428
+              protocol: TCP
+          volumeMounts:
+            - name: storage
+              mountPath: /victoria-logs-data
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-victoria-logs-pvc

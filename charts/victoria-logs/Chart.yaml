@@ -1,0 +1,11 @@
+apiVersion: v2
+name: victoria-logs
+description: A Helm chart for Victoria Logs - a high-performance logs storage system
+type: application
+version: 0.1.0
+appVersion: "v0.9.3"
+home: https://github.com/VictoriaMetrics/VictoriaMetrics
+sources:
+  - https://github.com/VictoriaMetrics/VictoriaMetrics
+maintainers:
+  - name: Web3 Message Board Team

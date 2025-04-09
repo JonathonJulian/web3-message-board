@@ -63,6 +63,10 @@ help:
 	@echo "  docker-build-multiarch - Build multi-architecture Docker images"
 	@echo "  docker-compose-up - Start all services with Docker Compose"
 	@echo "  docker-compose-down - Stop all services with Docker Compose"
+	@echo "  victoria-logs-deploy - Deploy Victoria Logs"
+	@echo "  victoria-logs-delete - Delete Victoria Logs"
+	@echo "  victoria-logs-logs - View Victoria Logs logs"
+	@echo "  logging-comparison - Compare Loki and Victoria Logs"
 
 # VM Management
 .PHONY: vm-create
@@ -611,3 +615,41 @@ postgres-password:
 	else \
 		echo "No PostgreSQL clusters found in namespace $(HELM_NAMESPACE)"; \
 	fi
+
+# Victoria Logs Deployment
+.PHONY: victoria-logs-deploy
+victoria-logs-deploy: helm-setup
+	@echo "Deploying Victoria Logs..."
+	cd charts/victoria-logs && \
+	./deploy-victoria-logs.sh \
+		--namespace $(HELM_NAMESPACE) \
+		--timeout 10m
+
+.PHONY: victoria-logs-delete
+victoria-logs-delete:
+	@echo "Deleting Victoria Logs..."
+	helm uninstall victoria-logs -n $(HELM_NAMESPACE) || true
+	kubectl delete pvc -l app=victoria-logs-victoria-logs -n $(HELM_NAMESPACE) || true
+	kubectl delete pv $(HELM_NAMESPACE)-victoria-logs-pv -n $(HELM_NAMESPACE) || true
+
+.PHONY: victoria-logs-logs
+victoria-logs-logs:
+	@echo "Viewing logs from Victoria Logs..."
+	kubectl logs -n $(HELM_NAMESPACE) -l app=victoria-logs-victoria-logs --tail=20
+	@echo "Victoria Logs agent logs (if exists):"
+	kubectl logs -n $(HELM_NAMESPACE) -l app=victoria-logs-victoria-logs-agent --tail=20 || echo "No Victoria Logs agent logs found"
+
+.PHONY: logging-comparison
+logging-comparison:
+	@echo "Comparing Loki and Victoria Logs..."
+	@echo "Loki memory usage:"
+	kubectl top pod -n $(HELM_NAMESPACE) -l app=loki || echo "Loki pods not found"
+	@echo ""
+	@echo "Victoria Logs memory usage:"
+	kubectl top pod -n $(HELM_NAMESPACE) -l app=victoria-logs-victoria-logs || echo "Victoria Logs pods not found"
+	@echo ""
+	@echo "Loki disk usage:"
+	kubectl exec -it -n $(HELM_NAMESPACE) $$(kubectl get pods -n $(HELM_NAMESPACE) -l app=loki -o name | head -n 1) -- df -h /var/loki || echo "Loki pods not found"
+	@echo ""
+	@echo "Victoria Logs disk usage:"
+	kubectl exec -it -n $(HELM_NAMESPACE) $$(kubectl get pods -n $(HELM_NAMESPACE) -l app=victoria-logs-victoria-logs -o name | head -n 1) -- df -h /victoria-logs-data || echo "Victoria Logs pods not found"
