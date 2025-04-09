@@ -114,20 +114,29 @@ jobs:
           # Create the destination directory
           mkdir -p ./terraform/environments/dev
 
+          # Configure MinIO client with proper alias
+          echo "Configuring MinIO client..."
+          mc alias set myminio http://minio.local minioadmin minioadmin
+
           # Verify MinIO connectivity and debug output
           echo "Testing MinIO connectivity..."
-          mc ls myminio/
+          mc ls myminio/ || echo "Failed to list MinIO root"
 
           echo "Listing terraform-state bucket contents..."
           mc ls myminio/terraform-state/ || echo "Failed to list bucket contents"
 
-          # Pull configurations from MinIO using absolute path for destination
+          # Pull configurations from MinIO using temporary file first
           echo "Pulling configurations from MinIO..."
-          DEST_PATH="$(pwd)/terraform/environments/dev/terraform.tfvars.json"
-          mc cp myminio/terraform-state/vm-configs.json "$DEST_PATH" || {
+          TEMP_FILE="/tmp/terraform.tfvars.json"
+          FINAL_PATH="$(pwd)/terraform/environments/dev/terraform.tfvars.json"
+
+          if mc cp myminio/terraform-state/vm-configs.json "$TEMP_FILE"; then
+            echo "Successfully downloaded from MinIO"
+            cp "$TEMP_FILE" "$FINAL_PATH"
+          else
             echo "Failed to copy from MinIO, creating default configuration..."
-            echo '{"vm_configs": {}}' > "$DEST_PATH"
-          }
+            echo '{"vm_configs": {}}' > "$FINAL_PATH"
+          fi
 
           # Display the current configurations
           echo "Current VM configurations:"
@@ -191,12 +200,13 @@ jobs:
 
             # Push updated config back to MinIO
             echo "Pushing updated configuration back to MinIO..."
-            SOURCE_PATH="$(pwd)/terraform/environments/dev/terraform.tfvars.json"
-            if [[ -f "$SOURCE_PATH" ]]; then
-              mc cp "$SOURCE_PATH" myminio/terraform-state/vm-configs.json || echo "Failed to push to MinIO, but continuing"
-            else
-              echo "Warning: Configuration file not found for pushing to MinIO"
-            fi
+            TEMP_FILE="/tmp/terraform-updated.tfvars.json"
+            cp ./terraform/environments/dev/terraform.tfvars.json "$TEMP_FILE"
+
+            # Configure MinIO client again in case this is a separate shell session
+            mc alias set myminio http://minio.local minioadmin minioadmin
+
+            mc cp "$TEMP_FILE" myminio/terraform-state/vm-configs.json || echo "Failed to push to MinIO, but continuing"
 
             echo "CONFIGS_SAVED=true" >> $GITHUB_ENV
           else
