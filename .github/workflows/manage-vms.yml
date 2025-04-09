@@ -3,7 +3,7 @@ name: Manage vSphere VMs
 on:
   push:
     branches:
-      - '*'
+      - 'feature/vm-management-automation'
   workflow_dispatch:
     inputs:
       action:
