@@ -2,9 +2,6 @@ name: Manage vSphere VMs
 
 on:
   push:
-    branches:
-      - '*'
-      - 'feature/vm-management-automation'  # Explicitly include our feature branch
   workflow_dispatch:
     inputs:
       action:
