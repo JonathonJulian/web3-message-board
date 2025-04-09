@@ -244,6 +244,12 @@ jobs:
             --subnet-mask="$SUBNET_MASK" \
             --ssh-public-key="$SSH_PUBLIC_KEY"
 
+          # Always run apply after add/remove operations to apply the changes
+          if [[ "$ACTION" == "add" || "$ACTION" == "remove" ]]; then
+            echo "Running apply operation to apply configuration changes..."
+            bash ./scripts/manage_vms.sh --action=apply
+          fi
+
           # Save VM configurations for next steps
           if [[ -f "./terraform/environments/dev/terraform.tfvars.json" ]]; then
             echo "Copying configuration for later steps..."
