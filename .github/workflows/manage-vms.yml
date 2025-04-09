@@ -152,9 +152,19 @@ jobs:
           if [[ "$ACTION" == "list" ]]; then
             ./scripts/manage_vms.sh list
           elif [[ "$ACTION" == "add" && -n "$VM_NAME" ]]; then
+            # First add the VM configuration
+            echo "Step 1: Adding VM configuration..."
             ./scripts/manage_vms.sh add "$VM_NAME" "$NETWORK_TYPE" "$IP_ADDRESS" "$SUBNET_MASK"
+
+            # Then apply the configuration
+            echo "Step 2: Applying configuration to create the VM..."
+            ./scripts/manage_vms.sh apply
           elif [[ "$ACTION" == "remove" && -n "$VM_NAME" ]]; then
             ./scripts/manage_vms.sh remove "$VM_NAME"
+
+            # Apply after removing
+            echo "Applying configuration to remove the VM..."
+            ./scripts/manage_vms.sh apply
           elif [[ "$ACTION" == "apply" ]]; then
             ./scripts/manage_vms.sh apply
           else
@@ -165,6 +175,11 @@ jobs:
           # Save VM configurations for next steps
           if [[ -f "./terraform/environments/dev/terraform.tfvars.json" ]]; then
             cp ./terraform/environments/dev/terraform.tfvars.json /tmp/vm_configs.json
+
+            # Push updated config back to MinIO
+            echo "Pushing updated configuration back to MinIO..."
+            mc cp ./terraform/environments/dev/terraform.tfvars.json myminio/terraform-state/vm-configs.json
+
             echo "CONFIGS_SAVED=true" >> $GITHUB_ENV
           else
             echo "CONFIGS_SAVED=false" >> $GITHUB_ENV
