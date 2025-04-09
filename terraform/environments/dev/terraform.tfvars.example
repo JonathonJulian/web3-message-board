@@ -1,20 +1,29 @@
-# vSphere connection details
-vsphere_user     = "administrator@vsphere.local"
-vsphere_password = "Pyjkat58!@"
-vsphere_server   = "192.168.1.100"
+# vCenter connection details
+# These values will be provided via environment variables:
+# TF_VAR_vsphere_user, TF_VAR_vsphere_password, TF_VAR_vsphere_server
+# Do not store credentials in this file
 
 # vSphere infrastructure details
 datacenter = "DC0"
 datastore  = "SSD"
 cluster    = "LabCluster"
-host       = "192.168.1.67"
+esxi_host  = "192.168.1.67"  # ESXi host IP address
 network    = "VM Network"
-vm_folder  = "/DevOps-VMs"
 
-# Network settings
-vm_domain      = "local"
-default_gateway = "192.168.1.254"
-dns_servers    = ["8.8.8.8", "8.8.4.4"]
+# Common VM settings (these will apply to all VMs)
+vm_cpu       = 2
+vm_memory    = 4096  # 4 GB RAM
+vm_disk_size = 40    # 40 GB
+
+# Network configuration
+gateway      = "192.168.1.1"  # Network gateway
+vm_domain    = "local"
+vm_netmask   = "255.255.255.0"
+dns_suffix   = "local"
+dns_servers  = ["192.168.1.10", "1.1.1.1"]
 
 # Authentication
-ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO3sOFB9wGEcOgNO5BfxF35Sh+EAOxWTZjx//DK4XHAx jon@example.com"
+ssh_public_key = "ssh-ed25519 YOUR_PUBLIC_KEY_HERE"
+
+# VM template and network settings
+vm_template = "ubuntu-2404-template"
