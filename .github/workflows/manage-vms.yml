@@ -146,7 +146,35 @@ jobs:
           echo "Current VM configurations:"
           cat ./terraform/environments/dev/terraform.tfvars.json | jq .
 
-      - name: Run VM management script
+      - name: List VM inventory (for list action only)
+        if: steps.params.outputs.action == 'list'
+        id: list_vms
+        run: |
+          # Set govc environment variables for vSphere API access
+          export GOVC_URL="https://${{ secrets.VSPHERE_SERVER }}"
+          export GOVC_USERNAME="${{ secrets.VSPHERE_USER }}"
+          export GOVC_PASSWORD="${{ secrets.VSPHERE_PASSWORD }}"
+          export GOVC_INSECURE=true  # Skip certificate verification for lab environments
+
+          echo "Listing VMs from vSphere inventory..."
+          echo "VM Paths:"
+          govc ls -l 'vm/*'
+
+          echo "Detailed VM Information:"
+          govc vm.info '*'
+
+          echo "VM power states:"
+          govc find . -type m -runtime.powerState on
+
+          echo "Network information:"
+          govc vm.network.info '*'
+
+          # Save list for summary
+          echo "CONFIGS_SAVED=false" >> $GITHUB_ENV
+          echo "VM_LIST_ACTION=true" >> $GITHUB_ENV
+
+      - name: Run VM management script (add/remove/apply actions)
+        if: steps.params.outputs.action != 'list'
         id: vm_management
         run: |
           # Make the script executable
@@ -159,14 +187,6 @@ jobs:
           IP_ADDRESS="${{ steps.params.outputs.ip_address }}"
           SUBNET_MASK="${{ steps.params.outputs.subnet_mask }}"
           SSH_PUBLIC_KEY="${{ steps.params.outputs.ssh_public_key }}"
-
-          if [[ "$ACTION" == "list" ]]; then
-            echo "Listing VMs from vSphere inventory..."
-            govc ls -l 'vm/*'
-            govc vm.info '*'
-            # Add any other helpful govc commands for listing
-            exit 0  # Exit successfully without running Terraform
-          fi
 
           # Check if IP is already in use and find a free one if needed
           if [[ "$NETWORK_TYPE" == "static" && "$ACTION" == "add" ]]; then
@@ -331,7 +351,8 @@ jobs:
       - name: Wait for VMs to come online and verify accessibility
         if: |
           env.CONFIGS_SAVED == 'true' &&
-          (steps.params.outputs.action == 'add' || steps.params.outputs.action == 'apply')
+          (steps.params.outputs.action == 'add' || steps.params.outputs.action == 'apply') &&
+          steps.params.outputs.action != 'list'
         id: wait_for_vms
         run: |
           # Create a status file for the summary
@@ -444,6 +465,16 @@ jobs:
 
           echo "- **Mode:** \`${{ env.IS_TEST_MODE == 'true' && 'TEST' || 'PRODUCTION' }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Action:** \`$ACTION\`" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "$ACTION" == "list" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## VM Inventory" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "VM listing was performed using direct vSphere API calls via govc. No Terraform operations were executed." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "See job logs for complete VM inventory details including paths, power states, and network information." >> $GITHUB_STEP_SUMMARY
+            exit 0  # Skip the rest of the summary for list action
+          fi
 
           if [[ "$ACTION" == "add" ]]; then
             echo "- **VM Added:** \`$VM_NAME\`" >> $GITHUB_STEP_SUMMARY
