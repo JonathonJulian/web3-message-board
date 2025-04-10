@@ -94,7 +94,7 @@ jobs:
 
       - name: Pull VM configurations from MinIO
         id: pull_configs
-        if: steps.action_flag.outputs.is_list_action == 'false'
+        if: steps.params.outputs.action != 'list'
         run: |
           # Create the destination directory
           mkdir -p ./terraform/environments/dev
@@ -127,20 +127,8 @@ jobs:
           echo "Current VM configurations:"
           cat ./terraform/environments/dev/terraform.tfvars.json | jq .
 
-      - name: Set action flag for steps
-        id: action_flag
-        run: |
-          # Set flags for different action types to use in later step conditions
-          if [[ "${{ steps.params.outputs.action }}" == "list" ]]; then
-            echo "is_list_action=true" >> $GITHUB_OUTPUT
-          else
-            echo "is_list_action=false" >> $GITHUB_OUTPUT
-          fi
-          echo "Action type is: ${{ steps.params.outputs.action }}"
-          echo "is_list_action: $(cat $GITHUB_OUTPUT | grep 'is_list_action=' | cut -d= -f2)"
-
       - name: List VM inventory (for list action only)
-        if: steps.action_flag.outputs.is_list_action == 'true'
+        if: steps.params.outputs.action == 'list'
         id: list_vms
         run: |
           echo "LIST ACTION TRIGGERED - Action value: ${{ steps.params.outputs.action }}"
@@ -169,7 +157,7 @@ jobs:
           echo "VM_LIST_ACTION=true" >> $GITHUB_ENV
 
       - name: Run VM management script (add/remove/apply actions)
-        if: steps.action_flag.outputs.is_list_action == 'false'
+        if: steps.params.outputs.action != 'list'
         id: vm_management
         run: |
           echo "VM MANAGEMENT SCRIPT TRIGGERED - Action value: ${{ steps.params.outputs.action }}"
