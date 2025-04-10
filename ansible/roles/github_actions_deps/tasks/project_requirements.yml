@@ -1,0 +1,54 @@
+---
+# Project-specific requirements
+
+# Install project-specific Ansible requirements
+- name: Check if ansible/requirements.yaml exists
+  stat:
+    path: "{{ project_root | default(ansible_env.PWD) }}/ansible/requirements.yaml"
+  register: ansible_reqs_yaml
+
+- name: Install Ansible Galaxy collections if requirements.yaml exists (macOS)
+  shell: >
+    source {{ project_root | default(ansible_env.PWD) }}/.ansible_venv/bin/activate &&
+    cd {{ project_root | default(ansible_env.PWD) }}/ansible &&
+    ansible-galaxy collection install -r requirements.yaml
+  args:
+    executable: /bin/bash
+  when: ansible_reqs_yaml.stat.exists and is_macos | bool
+
+- name: Install Ansible Galaxy collections if requirements.yaml exists (Linux)
+  command:
+    cmd: ansible-galaxy collection install -r requirements.yaml
+    chdir: "{{ project_root | default(ansible_env.PWD) }}/ansible"
+  when: ansible_reqs_yaml.stat.exists and not is_macos | bool
+
+- name: Check if ansible/requirements.txt exists
+  stat:
+    path: "{{ project_root | default(ansible_env.PWD) }}/ansible/requirements.txt"
+  register: ansible_reqs_txt
+
+- name: Install Python requirements if requirements.txt exists (macOS)
+  pip:
+    requirements: "{{ project_root | default(ansible_env.PWD) }}/ansible/requirements.txt"
+    state: present
+    virtualenv: "{{ project_root | default(ansible_env.PWD) }}/.ansible_venv"
+  when: ansible_reqs_txt.stat.exists and is_macos | bool
+
+- name: Install Python requirements if requirements.txt exists (Linux)
+  pip:
+    requirements: "{{ project_root | default(ansible_env.PWD) }}/ansible/requirements.txt"
+    state: present
+    extra_args: --user
+  when: ansible_reqs_txt.stat.exists and not is_macos | bool
+
+# Create activation script for the virtual environment
+- name: Create virtual environment activation script
+  copy:
+    dest: "{{ project_root | default(ansible_env.PWD) }}/activate_ansible_env.sh"
+    content: |
+      #!/bin/bash
+      # This script activates the Ansible virtual environment
+      source {{ project_root | default(ansible_env.PWD) }}/.ansible_venv/bin/activate
+      echo "Ansible virtual environment activated. Run 'deactivate' to exit."
+    mode: '0755'
+  when: is_macos | bool

@@ -1,0 +1,40 @@
+---
+# Tasks for installing Rustscan
+
+- name: Install Rust dependencies
+  apt:
+    name:
+      - build-essential
+      - pkg-config
+      - libssl-dev
+    state: present
+  become: true
+  when: ansible_os_family == "Debian"
+
+- name: Install Rust using rustup
+  shell: |
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  args:
+    creates: "{{ ansible_env.HOME }}/.cargo/bin/rustc"
+
+- name: Update PATH for cargo
+  lineinfile:
+    path: "{{ ansible_env.HOME }}/.bashrc"
+    line: 'export PATH="$HOME/.cargo/bin:$PATH"'
+    state: present
+
+- name: Install Rustscan with cargo
+  shell: |
+    . "{{ ansible_env.HOME }}/.cargo/env" && cargo install rustscan
+  args:
+    creates: "{{ ansible_env.HOME }}/.cargo/bin/rustscan"
+
+- name: Verify Rustscan installation
+  shell: |
+    . "{{ ansible_env.HOME }}/.cargo/env" && rustscan --version
+  register: rustscan_version
+  changed_when: false
+
+- name: Display Rustscan version
+  debug:
+    var: rustscan_version.stdout

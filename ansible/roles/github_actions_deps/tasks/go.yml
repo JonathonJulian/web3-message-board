@@ -1,0 +1,74 @@
+---
+# Go language runtime installation
+
+- name: Set Go version
+  set_fact:
+    go_version: "{{ go_version | default('1.20.6') }}"
+    go_install_dir: "{{ go_install_dir | default('/usr/local/go') }}"
+
+# Check if Go is already installed with the correct version
+- name: Check if Go is already installed and version is correct
+  shell: |
+    if [ -x "{{ go_install_dir }}/bin/go" ]; then
+      installed_version=$({{ go_install_dir }}/bin/go version | cut -d' ' -f3 | sed 's/go//')
+      if [ "$installed_version" = "{{ go_version }}" ]; then
+        echo "correct_version"
+      else
+        echo "wrong_version"
+      fi
+    else
+      echo "not_installed"
+    fi
+  register: go_version_check
+  changed_when: false
+
+# Install Go for Linux systems
+- name: Install Go (Linux)
+  block:
+    - name: Download Go installer
+      get_url:
+        url: "https://go.dev/dl/go{{ go_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/go{{ go_version }}.linux-amd64.tar.gz"
+        mode: '0644'
+      when: ansible_system == "Linux" and ansible_architecture == "x86_64"
+
+    - name: Remove old Go installation if exists
+      file:
+        path: "{{ go_install_dir }}"
+        state: absent
+      become: true
+
+    - name: Extract Go tarball
+      unarchive:
+        src: "/tmp/go{{ go_version }}.linux-amd64.tar.gz"
+        dest: "/usr/local"
+        remote_src: yes
+      become: true
+      when: ansible_system == "Linux" and ansible_architecture == "x86_64"
+
+    - name: Add Go to system PATH
+      lineinfile:
+        path: /etc/profile.d/go.sh
+        line: 'export PATH=$PATH:{{ go_install_dir }}/bin'
+        create: yes
+        mode: '0644'
+      become: true
+
+    - name: Add Go to bashrc for immediate use
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: 'export PATH=$PATH:{{ go_install_dir }}/bin'
+        state: present
+  when:
+    - ansible_system == "Linux"
+    - not is_macos | bool
+    - sudo_access.rc == 0
+    - go_version_check.stdout != "correct_version"
+
+# Install Go for macOS
+- name: Install Go (macOS)
+  homebrew:
+    name: go
+    state: present
+  when:
+    - is_macos | bool

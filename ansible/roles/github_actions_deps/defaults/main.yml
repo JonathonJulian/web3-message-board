@@ -21,6 +21,13 @@ install_pnpm: true
 install_ansible: true
 install_github_cli: true
 
+# Additional tool installation toggles
+install_terraform: false
+install_rustscan: false
+install_artillery: false
+install_govmomi: false
+install_helm: false
+
 # Kubernetes configuration
 install_kubectl: true
 kubectl_version: "1.28.2"

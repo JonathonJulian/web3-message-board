@@ -1,0 +1,109 @@
+---
+# Tasks for installing GitHub Actions runner dependencies
+
+# Environment detection
+- name: Check for macOS
+  set_fact:
+    is_macos: "{{ ansible_distribution == 'MacOSX' }}"
+
+- name: Check for Ubuntu 24.04
+  set_fact:
+    is_ubuntu_24_04: "{{ ansible_distribution == 'Ubuntu' and ansible_distribution_release == 'noble' }}"
+
+- name: Check if we have sudo access
+  command: "sudo -n true"
+  register: sudo_access
+  changed_when: false
+  ignore_errors: true
+
+# Skip system-level installations on macOS or without sudo
+- name: Skip system installations message
+  debug:
+    msg: "Skipping system-level installations (running on macOS or no sudo access)"
+  when: is_macos | bool or sudo_access.rc != 0
+
+# System tasks are skipped on macOS or without sudo
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  become: true
+  when: ansible_os_family == "Debian" and not (is_macos | bool) and sudo_access.rc == 0
+
+- name: Install common system dependencies
+  package:
+    name:
+      - make
+      - git
+      - curl
+      - wget
+      - gnupg
+# Include tool-specific task files
+
+- name: Install GitHub CLI
+  include_tasks: github_cli.yml
+  when: install_github_cli | bool
+
+- name: Install Go
+  include_tasks: go.yml
+  when: install_go | bool
+
+- name: Install Node.js
+  include_tasks: node.yml
+  when: install_node | bool
+
+- name: Install pnpm
+  include_tasks: pnpm.yml
+  when: install_pnpm | bool and install_node | bool
+
+# Ansible and Python venv setup
+- name: Install Ansible
+  include_tasks: ansible.yml
+  when: install_ansible | bool and not is_macos | bool
+
+# Include Python virtual environment setup for macOS
+- name: Set up Python virtual environment on macOS
+  include_tasks: python_venv.yml
+  when: is_macos | bool
+
+# Include tool-specific tasks for other tools
+- name: Install Terraform
+  include_tasks: terraform.yml
+  when: install_terraform | bool
+
+- name: Install RustScan
+  include_tasks: rustscan.yml
+  when: install_rustscan | bool
+
+- name: Install Artillery
+  include_tasks: artillery.yml
+  when: install_artillery | bool
+
+- name: Install govmomi
+  include_tasks: govmomi.yml
+  when: install_govmomi | bool
+
+- name: Install Helm
+  include_tasks: helm.yml
+  when: install_helm | bool
+
+- name: Install Kubernetes tools
+  include_tasks: kubernetes.yml
+  when: install_kubectl | bool or setup_kubernetes | bool
+
+# Project requirements setup
+- name: Install project requirements
+  include_tasks: project_requirements.yml
+
+# Create flag file to indicate dependencies are installed
+- name: Check if dependency flag file exists
+  stat:
+    path: "{{ ansible_env.HOME }}/.ansible_deps_installed"
+  register: deps_flag
+
+- name: Create dependency flag file
+  file:
+    path: "{{ ansible_env.HOME }}/.ansible_deps_installed"
+    state: touch
+    mode: '0644'
+  when: not deps_flag.stat.exists
