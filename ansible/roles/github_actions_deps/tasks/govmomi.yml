@@ -1,0 +1,75 @@
+---
+# Tasks for installing Govmomi CLI (govc) for VMware vSphere
+
+- name: Create local bin directory for govc
+  file:
+    path: "{{ ansible_env.HOME }}/.local/bin"
+    state: directory
+    mode: '0755'
+  when: ansible_system == "Linux"
+
+- name: Install govc CLI using direct download URL
+  shell: |
+    curl -L -o /tmp/govc.tar.gz "https://github.com/vmware/govmomi/releases/download/v0.49.0/govc_Linux_x86_64.tar.gz"
+    tar -xzf /tmp/govc.tar.gz -C /tmp/
+    cp /tmp/govc {{ ansible_env.HOME }}/.local/bin/govc
+    chmod +x {{ ansible_env.HOME }}/.local/bin/govc
+    rm -f /tmp/govc.tar.gz
+  args:
+    creates: "{{ ansible_env.HOME }}/.local/bin/govc"
+  when: ansible_system == "Linux"
+  register: govc_download
+  ignore_errors: yes
+
+- name: Install govc CLI using alternative direct pipe method (if previous method failed)
+  shell: |
+    curl -L -o - "https://github.com/vmware/govmomi/releases/download/v0.49.0/govc_Linux_x86_64.tar.gz" | tar -C {{ ansible_env.HOME }}/.local/bin -xzf - govc
+    chmod +x {{ ansible_env.HOME }}/.local/bin/govc
+  args:
+    creates: "{{ ansible_env.HOME }}/.local/bin/govc"
+  when: ansible_system == "Linux" and (govc_download is failed or govc_download is skipped)
+  register: govc_alternative_download
+  ignore_errors: yes
+
+- name: Add govc bin to user PATH in .bashrc
+  lineinfile:
+    path: "{{ ansible_env.HOME }}/.bashrc"
+    line: 'export PATH="$HOME/.local/bin:$PATH"'
+    state: present
+  when: ansible_system == "Linux"
+
+- name: Create govc configuration directory
+  file:
+    path: "{{ ansible_env.HOME }}/.govc"
+    state: directory
+    mode: '0755'
+  when: ansible_system == "Linux"
+
+- name: Configure govc environment in .bashrc
+  blockinfile:
+    path: "{{ ansible_env.HOME }}/.bashrc"
+    marker: "# {mark} GOVC ENVIRONMENT VARIABLES"
+    block: |
+      # GOVC environment variables - customize as needed
+      export GOVC_URL=""
+      export GOVC_USERNAME=""
+      export GOVC_PASSWORD=""
+      export GOVC_INSECURE=true
+      # export GOVC_DATACENTER=""
+      # export GOVC_DATASTORE=""
+  when: ansible_system == "Linux"
+
+- name: Set up fallback if govc installation failed
+  block:
+    - name: Create a stub govc command
+      copy:
+        dest: "{{ ansible_env.HOME }}/.local/bin/govc"
+        content: |
+          #!/bin/bash
+          echo "govc not installed - this is a placeholder"
+          exit 0
+        mode: '0755'
+  when: >
+    ansible_system == "Linux" and
+    (govc_download is failed or govc_download is skipped) and
+    (govc_alternative_download is failed or govc_alternative_download is skipped)

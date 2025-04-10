@@ -1,0 +1,32 @@
+---
+# Tasks for installing Artillery load testing tool
+
+- name: Check if npm is available
+  command: which npm
+  register: npm_check
+  changed_when: false
+  ignore_errors: yes
+
+- name: Check if Artillery is already installed
+  command: which artillery
+  register: artillery_check
+  changed_when: false
+  ignore_errors: yes
+  when: npm_check.rc == 0
+
+- name: Install Artillery globally with npm
+  shell: |
+    npm install -g artillery
+  become: true
+  when: not is_macos | bool and sudo_access.rc == 0 and npm_check.rc == 0 and (artillery_check is skipped or artillery_check.rc != 0)
+
+- name: Verify Artillery installation
+  command: artillery --version
+  register: artillery_version
+  changed_when: false
+  when: npm_check.rc == 0
+
+- name: Display Artillery version
+  debug:
+    var: artillery_version.stdout
+  when: artillery_version is defined and artillery_version.stdout is defined

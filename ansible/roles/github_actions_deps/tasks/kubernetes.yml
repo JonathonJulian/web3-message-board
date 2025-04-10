@@ -1,0 +1,76 @@
+---
+# Tasks for installing Kubernetes tools and configuration
+
+- name: Install kubectl
+  block:
+    - name: Set kubernetes version for URL (strip leading v if present)
+      set_fact:
+        kubectl_version_clean: "{{ kubectl_version | regex_replace('^v', '') }}"
+
+    - name: Download kubectl binary
+      get_url:
+        url: "https://dl.k8s.io/release/v{{ kubectl_version_clean }}/bin/linux/amd64/kubectl"
+        dest: "/tmp/kubectl"
+        mode: '0755'
+      when: ansible_system == "Linux" and ansible_architecture == "x86_64" and not is_macos | bool
+
+    - name: Move kubectl binary to path
+      copy:
+        src: "/tmp/kubectl"
+        dest: "/usr/local/bin/kubectl"
+        mode: '0755'
+        remote_src: yes
+      become: true
+      when: ansible_system == "Linux" and ansible_architecture == "x86_64" and not is_macos | bool and sudo_access.rc == 0
+  when: install_kubectl | bool and not is_macos | bool and sudo_access.rc == 0
+
+- name: Create .kube directory if it doesn't exist
+  file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+    mode: '0700'
+  when: setup_kubernetes | bool
+
+# Set up kubeconfig from file
+- name: Set up kubeconfig from local file
+  block:
+    - name: Read local kubeconfig content
+      slurp:
+        src: "{{ kubeconfig_path }}"
+      register: kubeconfig_content_local
+      delegate_to: localhost
+
+    - name: Set kubeconfig_content from local file
+      set_fact:
+        kubeconfig_content: "{{ kubeconfig_content_local['content'] | b64decode }}"
+      when: kubeconfig_content_local is defined and kubeconfig_content_local.skipped is not defined
+
+    - name: Copy kubeconfig file to runner
+      copy:
+        content: "{{ kubeconfig_content }}"
+        dest: "{{ ansible_env.HOME }}/.kube/config"
+        mode: '0600'
+  when: setup_kubernetes | bool and kubeconfig_source == 'file' and kubeconfig_path | length > 0
+
+# Set up kubeconfig from provided content (secret)
+- name: Set up kubeconfig from provided content
+  copy:
+    content: "{{ kubeconfig_content }}"
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    mode: '0600'
+  when: setup_kubernetes | bool and kubeconfig_source == 'secret' and kubeconfig_content | length > 0
+
+# Create GitHub Actions secret path for kubeconfig
+- name: Create GitHub Actions kubeconfig directory
+  file:
+    path: "{{ ansible_env.HOME }}/actions-runner/_work/_temp"
+    state: directory
+    mode: '0755'
+  when: setup_kubernetes | bool and kubeconfig_source == 'secret'
+
+- name: Create symlink for GitHub Actions secrets path
+  file:
+    src: "{{ ansible_env.HOME }}/.kube/config"
+    dest: "{{ ansible_env.HOME }}/actions-runner/_work/_temp/kubeconfig"
+    state: link
+  when: setup_kubernetes | bool and kubeconfig_source == 'secret'
