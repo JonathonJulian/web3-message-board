@@ -160,6 +160,14 @@ jobs:
           SUBNET_MASK="${{ steps.params.outputs.subnet_mask }}"
           SSH_PUBLIC_KEY="${{ steps.params.outputs.ssh_public_key }}"
 
+          if [[ "$ACTION" == "list" ]]; then
+            echo "Listing VMs from vSphere inventory..."
+            govc ls -l 'vm/*'
+            govc vm.info '*'
+            # Add any other helpful govc commands for listing
+            exit 0  # Exit successfully without running Terraform
+          fi
+
           # Check if IP is already in use and find a free one if needed
           if [[ "$NETWORK_TYPE" == "static" && "$ACTION" == "add" ]]; then
             echo "Checking if IP $IP_ADDRESS is available..."
