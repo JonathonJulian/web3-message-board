@@ -40,25 +40,6 @@ on:
         type: string
 
 env:
-  # Determine if we're in test mode based on branch (anything other than main/master)
-  IS_TEST_MODE: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
-
-  # For production (main branch), use the inputs
-  PROD_ACTION: ${{ github.event.inputs.action }}
-  PROD_VM_NAME: ${{ github.event.inputs.vm_name }}
-  PROD_NETWORK_TYPE: ${{ github.event.inputs.network_type }}
-  PROD_IP_ADDRESS: ${{ github.event.inputs.ip_address }}
-  PROD_SUBNET_MASK: ${{ github.event.inputs.subnet_mask }}
-  PROD_SSH_PUBLIC_KEY: ${{ github.event.inputs.ssh_public_key }}
-
-  # For testing (non-main branches), use repository variables or defaults
-  TEST_ACTION: ${{ vars.TEST_ACTION || 'remove' }}
-  TEST_VM_NAME: ${{ vars.TEST_VM_NAME || 'webserver' }}
-  TEST_NETWORK_TYPE: ${{ vars.TEST_NETWORK_TYPE || 'static' }}
-  TEST_IP_ADDRESS: ${{ vars.TEST_IP_ADDRESS || '192.168.1.204' }}
-  TEST_SUBNET_MASK: ${{ vars.TEST_SUBNET_MASK || '24' }}
-  TEST_SSH_PUBLIC_KEY: ${{ vars.TEST_SSH_PUBLIC_KEY || 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO3sOFB9wGEcOgNO5BfxF35Sh+EAOxWTZjx//DK4XHAx jon@blocknative.com' }}
-
   # vSphere credentials from secrets
   VSPHERE_SERVER: ${{ secrets.VSPHERE_SERVER }}
   VSPHERE_USER: ${{ secrets.VSPHERE_USER }}
@@ -93,27 +74,16 @@ jobs:
       - name: Set parameters based on mode
         id: params
         run: |
-          # Determine which set of parameters to use based on test mode
-          if [[ "${{ env.IS_TEST_MODE }}" == "true" ]]; then
-            echo "Using TEST mode parameters from repository variables"
-            echo "action=${{ env.TEST_ACTION }}" >> $GITHUB_OUTPUT
-            echo "vm_name=${{ env.TEST_VM_NAME }}" >> $GITHUB_OUTPUT
-            echo "network_type=${{ env.TEST_NETWORK_TYPE }}" >> $GITHUB_OUTPUT
-            echo "ip_address=${{ env.TEST_IP_ADDRESS }}" >> $GITHUB_OUTPUT
-            echo "subnet_mask=${{ env.TEST_SUBNET_MASK }}" >> $GITHUB_OUTPUT
-            echo "ssh_public_key=${{ env.TEST_SSH_PUBLIC_KEY }}" >> $GITHUB_OUTPUT
-          else
-            echo "Using PRODUCTION mode parameters from workflow inputs"
-            echo "action=${{ env.PROD_ACTION }}" >> $GITHUB_OUTPUT
-            echo "vm_name=${{ env.PROD_VM_NAME }}" >> $GITHUB_OUTPUT
-            echo "network_type=${{ env.PROD_NETWORK_TYPE }}" >> $GITHUB_OUTPUT
-            echo "ip_address=${{ env.PROD_IP_ADDRESS }}" >> $GITHUB_OUTPUT
-            echo "subnet_mask=${{ env.PROD_SUBNET_MASK }}" >> $GITHUB_OUTPUT
-            echo "ssh_public_key=${{ env.PROD_SSH_PUBLIC_KEY }}" >> $GITHUB_OUTPUT
-          fi
+          # Directly use workflow dispatch inputs
+          echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
+          echo "vm_name=${{ github.event.inputs.vm_name }}" >> $GITHUB_OUTPUT
+          echo "network_type=${{ github.event.inputs.network_type }}" >> $GITHUB_OUTPUT
+          echo "ip_address=${{ github.event.inputs.ip_address }}" >> $GITHUB_OUTPUT
+          echo "subnet_mask=${{ github.event.inputs.subnet_mask }}" >> $GITHUB_OUTPUT
+          echo "ssh_public_key=${{ github.event.inputs.ssh_public_key }}" >> $GITHUB_OUTPUT
 
           # Debug output to verify action value
-          echo "Selected action: $(cat $GITHUB_OUTPUT | grep 'action=' | cut -d= -f2)"
+          echo "Selected action: ${{ github.event.inputs.action }}"
 
       - name: Debug parameters
         run: |
@@ -490,7 +460,6 @@ jobs:
           SUBNET_MASK="${{ steps.params.outputs.subnet_mask }}"
           SSH_PUBLIC_KEY="${{ steps.params.outputs.ssh_public_key }}"
 
-          echo "- **Mode:** \`${{ env.IS_TEST_MODE == 'true' && 'TEST' || 'PRODUCTION' }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Action:** \`$ACTION\`" >> $GITHUB_STEP_SUMMARY
 
           if [[ "$ACTION" == "list" ]]; then
