@@ -60,18 +60,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Install dependencies
-        run: |
-          # Skip system-level package installation
-          echo "Skipping apt-get update since we can't use sudo"
-          echo "Assuming required dependencies are already installed on the runner"
-
       - name: Verify Terraform is installed
         run: |
           terraform --version
           echo "Using existing Terraform installation on the runner"
 
-      - name: Set parameters based on mode
+      - name: Set parameters
         id: params
         run: |
           # Directly use workflow dispatch inputs
@@ -81,16 +75,6 @@ jobs:
           echo "ip_address=${{ github.event.inputs.ip_address }}" >> $GITHUB_OUTPUT
           echo "subnet_mask=${{ github.event.inputs.subnet_mask }}" >> $GITHUB_OUTPUT
           echo "ssh_public_key=${{ github.event.inputs.ssh_public_key }}" >> $GITHUB_OUTPUT
-
-          # Debug output to verify action value
-          echo "Selected action: ${{ github.event.inputs.action }}"
-
-      - name: Debug parameters
-        run: |
-          echo "ACTION: ${{ steps.params.outputs.action }}"
-          echo "Is action 'list'? ${{ steps.params.outputs.action == 'list' }}"
-          echo "VM_NAME: ${{ steps.params.outputs.vm_name }}"
-          echo "NETWORK_TYPE: ${{ steps.params.outputs.network_type }}"
 
       - name: Pull VM configurations from MinIO
         id: pull_configs
@@ -131,8 +115,6 @@ jobs:
         if: steps.params.outputs.action == 'list'
         id: list_vms
         run: |
-          echo "LIST ACTION TRIGGERED - Action value: ${{ steps.params.outputs.action }}"
-
           # Set govc environment variables for vSphere API access
           export GOVC_URL="https://${{ secrets.VSPHERE_SERVER }}"
           export GOVC_USERNAME="${{ secrets.VSPHERE_USER }}"
@@ -160,8 +142,6 @@ jobs:
         if: steps.params.outputs.action != 'list'
         id: vm_management
         run: |
-          echo "VM MANAGEMENT SCRIPT TRIGGERED - Action value: ${{ steps.params.outputs.action }}"
-
           # Make the script executable
           chmod +x ./scripts/manage_vms.sh
 
