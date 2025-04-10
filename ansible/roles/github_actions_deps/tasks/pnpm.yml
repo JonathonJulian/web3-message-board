@@ -1,0 +1,14 @@
+---
+# PNPM package manager installation
+
+- name: Download pnpm installer
+  shell: curl -fsSL https://get.pnpm.io/install.sh | sh -
+  args:
+    creates: "{{ ansible_env.HOME }}/.local/share/pnpm/pnpm"
+
+- name: Add pnpm to user PATH
+  lineinfile:
+    path: "{{ ansible_env.HOME }}/.bashrc"
+    line: 'export PATH=$PATH:{{ ansible_env.HOME }}/.local/share/pnpm'
+    state: present
+    create: yes

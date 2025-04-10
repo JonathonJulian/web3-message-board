@@ -1,0 +1,88 @@
+---
+# Ansible installation for all platforms
+
+# Ubuntu 24.04 requires using virtual environments for pip installations
+- name: Install Ansible (Ubuntu 24.04)
+  block:
+    - name: Ensure python3-venv is installed
+      apt:
+        name: python3-venv
+        state: present
+      become: true
+
+    - name: Create ansible venv directory
+      file:
+        path: "{{ ansible_env.HOME }}/.ansible_venv"
+        state: directory
+        mode: '0755'
+
+    - name: Create Python virtual environment for Ansible
+      shell: python3 -m venv {{ ansible_env.HOME }}/.ansible_venv
+      args:
+        creates: "{{ ansible_env.HOME }}/.ansible_venv/bin/activate"
+
+    - name: Install Ansible in virtual environment
+      pip:
+        name: ansible
+        state: present
+        virtualenv: "{{ ansible_env.HOME }}/.ansible_venv"
+
+    - name: Install Ansible dependencies in virtual environment
+      pip:
+        name:
+          - ansible-lint
+          - molecule
+          - molecule-docker
+          - passlib
+          - boto3
+          - docker
+          - python-jenkins
+        state: present
+        virtualenv: "{{ ansible_env.HOME }}/.ansible_venv"
+
+    - name: Add ansible venv activation to .bashrc
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: 'export PATH="{{ ansible_env.HOME }}/.ansible_venv/bin:$PATH"'
+        state: present
+
+    - name: Create ansible venv activation helper script
+      copy:
+        dest: "{{ ansible_env.HOME }}/activate_ansible.sh"
+        content: |
+          #!/bin/bash
+          # This script activates the Ansible virtual environment
+          source {{ ansible_env.HOME }}/.ansible_venv/bin/activate
+          echo "Ansible virtual environment activated. Run 'deactivate' to exit."
+        mode: '0755'
+  when:
+    - ansible_distribution == "Ubuntu"
+    - ansible_distribution_release == "noble"
+    - not is_macos | bool
+
+# Standard installation for other Linux systems
+- name: Install Ansible (Standard Linux)
+  block:
+    - name: Install Ansible with pip (user-level)
+      pip:
+        name: ansible
+        state: present
+        executable: pip3
+        extra_args: --user
+
+    - name: Install typical Ansible dependencies (user-level)
+      pip:
+        name:
+          - ansible-lint
+          - molecule
+          - molecule-docker
+          - passlib
+          - boto3
+          - docker
+          - python-jenkins
+        state: present
+        executable: pip3
+        extra_args: --user
+  when:
+    - not is_macos | bool
+    - not (ansible_distribution == "Ubuntu" and ansible_distribution_release == "noble")

@@ -18,6 +18,11 @@
     install_pnpm: true
     install_ansible: true
     install_github_cli: true
+    install_govmomi: true
+    install_helm: true
+    install_rustscan: true
+    install_artillery: true
+    install_terraform: true
 
     # Kubernetes configuration
     install_kubectl: true

@@ -1,0 +1,82 @@
+---
+# GitHub CLI installation for Debian/Ubuntu
+
+- name: Install GitHub CLI
+  block:
+    - name: Install wget if not available
+      apt:
+        name: wget
+        state: present
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Download GitHub CLI signing key
+      get_url:
+        url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+        dest: /tmp/githubcli.gpg
+        mode: '0644'
+      when: ansible_os_family == "Debian"
+
+    - name: Install GitHub CLI keyring
+      shell: cat /tmp/githubcli.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+      args:
+        creates: /etc/apt/keyrings/githubcli-archive-keyring.gpg
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Set proper permissions for keyring
+      file:
+        path: /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        mode: 'go+r'
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Add GitHub CLI repository
+      shell: echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+      args:
+        creates: /etc/apt/sources.list.d/github-cli.list
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 86400  # Only update if cache is older than 24 hours
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Install GitHub CLI
+      apt:
+        name: gh
+        state: present
+      become: true
+      when: ansible_os_family == "Debian"
+  when:
+    - ansible_os_family == "Debian"
+    - not is_macos | bool
+    - sudo_access.rc == 0
+
+# For macOS, add homebrew installation
+- name: Install GitHub CLI (macOS)
+  homebrew:
+    name: gh
+    state: present
+  when:
+    - is_macos | bool
+
+- name: Verify GitHub CLI installation
+  command: gh --version
+  register: gh_version
+  changed_when: false
+
+- name: Display GitHub CLI version
+  debug:
+    var: gh_version.stdout_lines[0]

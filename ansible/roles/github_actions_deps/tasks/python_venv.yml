@@ -1,0 +1,32 @@
+---
+# Python virtual environment setup for macOS
+
+- name: Create venv directory
+  file:
+    path: "{{ project_root | default(ansible_env.PWD) }}/.ansible_venv"
+    state: directory
+    mode: '0755'
+
+- name: Create Python virtual environment
+  command: python3 -m venv {{ project_root | default(ansible_env.PWD) }}/.ansible_venv
+  args:
+    creates: "{{ project_root | default(ansible_env.PWD) }}/.ansible_venv/bin/activate"
+
+- name: Install Ansible in virtual environment
+  pip:
+    name: ansible
+    state: present
+    virtualenv: "{{ project_root | default(ansible_env.PWD) }}/.ansible_venv"
+
+- name: Install Ansible dependencies in virtual environment
+  pip:
+    name:
+      - ansible-lint
+      - molecule
+      - molecule-docker
+      - passlib
+      - boto3
+      - docker
+      - python-jenkins
+    state: present
+    virtualenv: "{{ project_root | default(ansible_env.PWD) }}/.ansible_venv"
