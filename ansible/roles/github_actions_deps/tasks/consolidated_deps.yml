@@ -1,0 +1,268 @@
+---
+# Consolidated GitHub Actions Dependencies
+
+########################
+# Terraform Installation
+########################
+- name: Set Terraform version
+  set_fact:
+    terraform_version: "{{ terraform_version | default('1.5.7') }}"
+
+- name: Check if Terraform is already installed
+  command: terraform --version
+  register: terraform_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Install Terraform
+  block:
+    - name: Add HashiCorp GPG key
+      apt_key:
+        url: https://apt.releases.hashicorp.com/gpg
+        state: present
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Add HashiCorp repository
+      apt_repository:
+        repo: "deb [arch={{ ansible_architecture }}] https://apt.releases.hashicorp.com {{ ansible_distribution_release }} main"
+        state: present
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Install Terraform package
+      apt:
+        name: terraform
+        state: present
+        update_cache: yes
+      become: true
+      when: ansible_os_family == "Debian"
+  when: terraform_check.rc != 0 or (terraform_check.stdout | regex_search('Terraform v' + terraform_version) == None)
+
+########################
+# Rustscan Installation
+########################
+- name: Check if Rustscan is already installed
+  command: which rustscan
+  register: rustscan_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Install Rustscan dependencies
+  package:
+    name:
+      - cargo
+      - rustc
+      - libssl-dev
+      - pkg-config
+    state: present
+  become: true
+  when: rustscan_check.rc != 0 and ansible_os_family == "Debian"
+
+- name: Install Rustscan with Cargo
+  command: cargo install rustscan
+  args:
+    creates: "{{ ansible_env.HOME }}/.cargo/bin/rustscan"
+  when: rustscan_check.rc != 0
+
+- name: Add Cargo bin to PATH if needed
+  lineinfile:
+    path: "{{ ansible_env.HOME }}/.bashrc"
+    line: 'export PATH=$PATH:{{ ansible_env.HOME }}/.cargo/bin'
+    state: present
+  when: rustscan_check.rc != 0
+
+########################
+# Artillery Installation
+########################
+- name: Check if Artillery is already installed
+  command: which artillery
+  register: artillery_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Install Artillery globally with npm
+  npm:
+    name: artillery
+    global: yes
+  when: artillery_check.rc != 0
+
+########################
+# govmomi Installation
+########################
+- name: Set govc version
+  set_fact:
+    govc_version: "{{ govc_version | default('v0.30.7') }}"
+
+- name: Check if govc is already installed
+  command: which govc
+  register: govc_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Download govc for Linux
+  block:
+    - name: Create temp directory
+      file:
+        path: /tmp/govc-download
+        state: directory
+        mode: '0755'
+
+    - name: Download govc binary
+      get_url:
+        url: "https://github.com/vmware/govmomi/releases/download/{{ govc_version }}/govc_Linux_x86_64.tar.gz"
+        dest: /tmp/govc-download/govc.tar.gz
+        mode: '0644'
+
+    - name: Extract govc binary
+      unarchive:
+        src: /tmp/govc-download/govc.tar.gz
+        dest: /tmp/govc-download
+        remote_src: yes
+
+    - name: Install govc
+      copy:
+        src: /tmp/govc-download/govc
+        dest: "{{ ansible_env.HOME }}/.local/bin/govc"
+        mode: '0755'
+        remote_src: true
+      register: govc_install
+
+    - name: Create local bin directory if needed
+      file:
+        path: "{{ ansible_env.HOME }}/.local/bin"
+        state: directory
+        mode: '0755'
+      when: govc_install is failed
+
+    - name: Retry Install govc
+      copy:
+        src: /tmp/govc-download/govc
+        dest: "{{ ansible_env.HOME }}/.local/bin/govc"
+        mode: '0755'
+        remote_src: true
+      when: govc_install is failed
+
+    - name: Ensure local bin is in PATH
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: 'export PATH=$PATH:{{ ansible_env.HOME }}/.local/bin'
+        state: present
+
+    - name: Clean up temp files
+      file:
+        path: /tmp/govc-download
+        state: absent
+  when: govc_check.rc != 0 and ansible_system == "Linux"
+
+########################
+# Helm Installation
+########################
+- name: Set Helm version
+  set_fact:
+    helm_version: "{{ helm_version | default('v3.12.3') }}"
+
+- name: Check if Helm is installed
+  command: which helm
+  register: helm_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Install Helm on Debian/Ubuntu
+  block:
+    - name: Add Kubernetes apt key
+      apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        state: present
+      become: true
+
+    - name: Add Kubernetes apt repository
+      apt_repository:
+        repo: "deb https://apt.kubernetes.io/ kubernetes-xenial main"
+        state: present
+      become: true
+
+    - name: Install Helm package
+      apt:
+        name: helm
+        state: present
+        update_cache: yes
+      become: true
+  when: helm_check.rc != 0 and ansible_os_family == "Debian"
+
+########################
+# Kubernetes Installation
+########################
+- name: Set kubectl version
+  set_fact:
+    kubectl_version: "{{ kubectl_version | default('1.27.0') }}"
+
+- name: Install kubectl
+  block:
+    - name: Download kubectl binary
+      get_url:
+        url: "https://dl.k8s.io/release/v{{ kubectl_version }}/bin/linux/amd64/kubectl"
+        dest: "/tmp/kubectl"
+        mode: '0755'
+      when: ansible_system == "Linux" and ansible_architecture == "x86_64" and not is_macos | bool
+
+    - name: Move kubectl binary to path
+      copy:
+        src: "/tmp/kubectl"
+        dest: "/usr/local/bin/kubectl"
+        mode: '0755'
+        remote_src: yes
+      become: true
+      when: ansible_system == "Linux" and ansible_architecture == "x86_64" and not is_macos | bool and sudo_access.rc == 0
+  when: install_kubectl | bool and not is_macos | bool and sudo_access.rc == 0
+
+- name: Create .kube directory if it doesn't exist
+  file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+    mode: '0700'
+  when: setup_kubernetes | bool
+
+# Set up kubeconfig from file
+- name: Set up kubeconfig from local file
+  block:
+    - name: Read local kubeconfig content
+      slurp:
+        src: "{{ kubeconfig_path }}"
+      register: kubeconfig_content_local
+      delegate_to: localhost
+
+    - name: Set kubeconfig_content from local file
+      set_fact:
+        kubeconfig_content: "{{ kubeconfig_content_local['content'] | b64decode }}"
+      when: kubeconfig_content_local is defined and kubeconfig_content_local.skipped is not defined
+
+    - name: Copy kubeconfig file to runner
+      copy:
+        content: "{{ kubeconfig_content }}"
+        dest: "{{ ansible_env.HOME }}/.kube/config"
+        mode: '0600'
+  when: setup_kubernetes | bool and kubeconfig_source == 'file' and kubeconfig_path | length > 0
+
+# Set up kubeconfig from provided content (secret)
+- name: Set up kubeconfig from provided content
+  copy:
+    content: "{{ kubeconfig_content }}"
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    mode: '0600'
+  when: setup_kubernetes | bool and kubeconfig_source == 'secret' and kubeconfig_content | length > 0
+
+# Create GitHub Actions secret path for kubeconfig
+- name: Create GitHub Actions kubeconfig directory
+  file:
+    path: "{{ ansible_env.HOME }}/actions-runner/_work/_temp"
+    state: directory
+    mode: '0755'
+  when: setup_kubernetes | bool and kubeconfig_source == 'secret'
+
+- name: Create symlink for GitHub Actions secrets path
+  file:
+    src: "{{ ansible_env.HOME }}/.kube/config"
+    dest: "{{ ansible_env.HOME }}/actions-runner/_work/_temp/kubeconfig"
+    state: link
+  when: setup_kubernetes | bool and kubeconfig_source == 'secret'
