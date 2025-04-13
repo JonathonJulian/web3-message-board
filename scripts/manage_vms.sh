@@ -93,8 +93,16 @@ if [[ "$ACTION" == "add" && -z "$VM_NAME" ]]; then
   exit 1
 fi
 
-if [[ "$NETWORK_TYPE" == "static" && -z "$IP_ADDRESS" ]]; then
-  echo "Error: IP_ADDRESS is required when network_type is static"
+# Only validate IP for add action with static network
+if [[ "$ACTION" == "add" && "$NETWORK_TYPE" == "static" && -z "$IP_ADDRESS" ]]; then
+  echo "Error: IP_ADDRESS is required when adding a VM with static network type"
+  exit 1
+fi
+
+# For remove action, only VM_NAME is required
+if [[ "$ACTION" == "remove" && -z "$VM_NAME" ]]; then
+  echo "Error: VM_NAME is required for remove action"
+  echo "Usage: $0 --action=remove --vm-name=<name>"
   exit 1
 fi
 
