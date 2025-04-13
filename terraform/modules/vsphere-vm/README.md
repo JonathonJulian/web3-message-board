@@ -113,3 +113,6 @@ output "vm_ips" {
 - Memory specifications in `vm_configs` are in GB (e.g., `memory = 4` means 4GB)
 - The `vm_memory_override` value is in MB (e.g., `vm_memory_override = 4096` means 4GB)
 - Ubuntu 24.04 (Noble) requires at least 2GB of memory to function properly
+- VM disk sizes have a minimum of 20GB to accommodate the Ubuntu 24.04 Noble image
+- If you specify a custom disk size in `vm_configs.disk_size_gb`, it must be at least 20GB
+- Disk sizes cannot be reduced after a VM is created (VMware limitation)
