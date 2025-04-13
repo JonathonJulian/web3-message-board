@@ -1,0 +1,12 @@
+---
+# Ubuntu-specific variables for RKE2 worker role
+
+# Ubuntu apt packages
+rke2_ubuntu_packages:
+  - curl
+  - ca-certificates
+  - jq
+  - iptables
+  - rsync
+  - apt-transport-https
+  - gnupg

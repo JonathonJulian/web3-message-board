@@ -62,6 +62,11 @@ on:
         required: false
         default: 4
         type: number
+      rke2_worker:
+        description: "Add as RKE2 worker node"
+        required: false
+        default: false
+        type: boolean
 
 env:
   # vSphere credentials from secrets
@@ -106,6 +111,7 @@ jobs:
           echo "SSH_PUBLIC_KEY=${{ github.event.inputs.ssh_public_key }}" >> $GITHUB_OUTPUT
           echo "DISK_SIZE_GB=${{ github.event.inputs.disk_size_gb }}" >> $GITHUB_OUTPUT
           echo "STORAGE_CLASS=${{ github.event.inputs.storage_class }}" >> $GITHUB_OUTPUT
+          echo "RKE2_WORKER=${{ github.event.inputs.rke2_worker }}" >> $GITHUB_OUTPUT
 
           # Ensure CPU is at least 2 cores
           CPU="${{ github.event.inputs.cpu }}"
@@ -121,6 +127,13 @@ jobs:
             MEMORY=2
             echo "Setting memory to minimum required value: 2GB"
           fi
+
+          # For RKE2 worker nodes, ensure at least 4GB memory
+          if [[ "${{ github.event.inputs.rke2_worker }}" == "true" && "$MEMORY" -lt 4 ]]; then
+            MEMORY=4
+            echo "Setting memory to minimum required value for RKE2: 4GB"
+          fi
+
           echo "MEMORY=$MEMORY" >> $GITHUB_OUTPUT
 
       - name: Pull VM configurations from MinIO
@@ -379,6 +392,7 @@ jobs:
           STORAGE_CLASS="${{ steps.params.outputs.storage_class }}"
           CPU="${{ steps.params.outputs.cpu }}"
           MEMORY="${{ steps.params.outputs.memory }}"
+          RKE2_WORKER="${{ steps.params.outputs.RKE2_WORKER }}"
 
           echo "- **Action:** \`$ACTION\`" >> $GITHUB_STEP_SUMMARY
 
@@ -391,6 +405,11 @@ jobs:
             echo "- **CPU Cores:** \`$CPU\`" >> $GITHUB_STEP_SUMMARY
             echo "- **Memory (GB):** \`$MEMORY\`" >> $GITHUB_STEP_SUMMARY
             echo "- **Disk Size (GB):** \`$DISK_SIZE_GB\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Storage Class:** \`$STORAGE_CLASS\`" >> $GITHUB_STEP_SUMMARY
+
+            if [[ "$RKE2_WORKER" == "true" ]]; then
+              echo "- **RKE2 Worker:** \`Yes\`" >> $GITHUB_STEP_SUMMARY
+            fi
           elif [[ "$ACTION" == "remove" ]]; then
             echo "- **VM Removed:** \`$VM_NAME\`" >> $GITHUB_STEP_SUMMARY
           fi
@@ -401,18 +420,18 @@ jobs:
           if [[ -f "/tmp/vm_status.json" ]]; then
             echo "## Current VMs" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| VM Key | Name | IP Address | Status | SSH | Access Command |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|------|------------|--------|-----|---------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| VM Key | Name | IP Address | Status | SSH | Access Command | RKE2 Worker |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|------|------------|--------|-----|---------------|-------------|" >> $GITHUB_STEP_SUMMARY
 
             # Process the status file with better error handling
             if jq -e . /tmp/vm_status.json > /dev/null 2>&1; then
               # Process the status file and add each VM to the table
-              jq -r '.[] | "| \(.key) | \(.name) | \(.ip) | \(.status) | \(.ssh_status) | `\(.ssh_command)` |"' /tmp/vm_status.json >> $GITHUB_STEP_SUMMARY || {
-                echo "| ⚠️ Error | Error processing status file | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
+              jq -r '.[] | "| \(.key) | \(.name) | \(.ip) | \(.status) | \(.ssh_status) | `\(.ssh_command)` | \(if .is_rke2_worker == "true" then "✅" else "❌" end) |"' /tmp/vm_status.json >> $GITHUB_STEP_SUMMARY || {
+                echo "| ⚠️ Error | Error processing status file | - | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
                 echo "Error details: Invalid JSON format in status file" >> $GITHUB_STEP_SUMMARY
               }
             else
-              echo "| ⚠️ Error | Error processing status file | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
+              echo "| ⚠️ Error | Error processing status file | - | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
               echo "Error details: Invalid JSON format in status file" >> $GITHUB_STEP_SUMMARY
             fi
 
@@ -426,8 +445,8 @@ jobs:
           elif [[ "${{ env.CONFIGS_SAVED }}" == "true" ]]; then
             echo "## Current VM Configurations" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| VM Key | Name | Network Type | IP Address | CPU | Memory (GB) |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|------|-------------|------------|-----|-------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| VM Key | Name | Network Type | IP Address | CPU | Memory (GB) | RKE2 Worker |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|------|-------------|------------|-----|-------------|-------------|" >> $GITHUB_STEP_SUMMARY
 
             # Process the configurations with better error handling
             if [[ -f "/tmp/vm_configs.json" ]] && jq -e . /tmp/vm_configs.json > /dev/null 2>&1; then
@@ -439,18 +458,24 @@ jobs:
                   NETWORK_TYPE=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].network_type" 2>/dev/null || echo "Unknown")
                   CPU=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].cpu // \"1\"" 2>/dev/null || echo "1")
                   MEMORY=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].memory // \"1\"" 2>/dev/null || echo "1")
+                  IS_RKE2=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].is_rke2_worker // \"false\"" 2>/dev/null || echo "false")
+
+                  RKE2_STATUS="❌"
+                  if [[ "$IS_RKE2" == "true" ]]; then
+                    RKE2_STATUS="✅"
+                  fi
 
                   if [[ "$NETWORK_TYPE" == "static" ]]; then
                     IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address" 2>/dev/null || echo "Unknown")
                     SUBNET_MASK=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].subnet_mask // \"24\"" 2>/dev/null || echo "24")
-                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | $IP_ADDRESS/$SUBNET_MASK | $CPU | $MEMORY |" >> $GITHUB_STEP_SUMMARY
+                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | $IP_ADDRESS/$SUBNET_MASK | $CPU | $MEMORY | $RKE2_STATUS |" >> $GITHUB_STEP_SUMMARY
                   else
-                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | DHCP | $CPU | $MEMORY |" >> $GITHUB_STEP_SUMMARY
+                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | DHCP | $CPU | $MEMORY | $RKE2_STATUS |" >> $GITHUB_STEP_SUMMARY
                   fi
                 fi
               done
             else
-              echo "| ⚠️ Error | Error processing configuration file | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
+              echo "| ⚠️ Error | Error processing configuration file | - | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
             fi
           else
             echo "No VM configurations found." >> $GITHUB_STEP_SUMMARY
@@ -468,3 +493,34 @@ jobs:
           elif [[ "${{ env.MINIO_PUSH_STATUS }}" == "failed" ]]; then
             echo "- **Status:** ❌ Failed to push to MinIO" >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Configure RKE2 worker node
+        if: |
+          env.CONFIGS_SAVED == 'true' &&
+          steps.params.outputs.action == 'add' &&
+          steps.params.outputs.RKE2_WORKER == 'true'
+        run: |
+          # Get the VM IP address from status file
+          VM_IP=$(jq -r '.[] | select(.key == "${{ steps.params.outputs.VM_NAME }}") | .ip' /tmp/vm_status.json)
+
+          if [[ -z "$VM_IP" || "$VM_IP" == "null" ]]; then
+            echo "❌ Could not find IP address for VM ${{ steps.params.outputs.VM_NAME }}"
+            exit 1
+          fi
+
+          echo "Configuring RKE2 worker node at $VM_IP..."
+
+          # Generate Ansible inventory file
+          cat > /tmp/ansible_inventory.ini << EOF
+          [rke2_workers]
+          ${{ steps.params.outputs.VM_NAME }} ansible_host=$VM_IP ansible_user=ubuntu ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+
+          [all:vars]
+          ansible_python_interpreter=/usr/bin/python3
+          EOF
+
+          # Run Ansible playbook with RKE2 token from GitHub secret
+          cd ansible
+          ansible-playbook -i /tmp/ansible_inventory.ini add-rke2-worker.yml -e "rke2_token=${{ secrets.RKE2_TOKEN }}" -e "rke2_server_url=${{ secrets.RKE2_SERVER_URL }}"
+
+          echo "✅ RKE2 worker node configuration completed"

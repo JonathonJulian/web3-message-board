@@ -1,0 +1,37 @@
+---
+# RKE2 version - use 'stable' for latest stable version
+rke2_worker_version: "stable"
+
+# RKE2 channel - stable, latest, testing
+rke2_worker_channel: "stable"
+
+# Server URL - URL of the RKE2 server to join
+rke2_server_url: "https://rke2-server:9345"
+
+# RKE2 worker config directory
+rke2_worker_config_dir: "/etc/rancher/rke2"
+
+# RKE2 worker systemd service name
+rke2_worker_service_name: "rke2-agent"
+
+# Install CNI plugins
+rke2_worker_install_cni: true
+
+# RKE2 worker node labels (optional)
+rke2_worker_node_labels: []
+
+# RKE2 worker node taints (optional)
+rke2_worker_node_taints: []
+
+# Linux user to add to rke2 group for kubectl access
+rke2_worker_kubectl_users:
+  - ubuntu
+
+# Server CA certificates to trust (optional)
+rke2_worker_additional_ca_certs: []
+
+# Registry configuration (optional)
+rke2_worker_registry_config: {}
+
+# Additional RKE2 worker configuration
+rke2_worker_additional_config: {}

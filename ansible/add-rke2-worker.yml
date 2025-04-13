@@ -1,0 +1,27 @@
+---
+# Playbook to add RKE2 worker nodes to an existing cluster
+- name: Add RKE2 worker node
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    # These values should be overridden with actual values
+    rke2_server_url: "{{ rke2_server_url | default('https://rke2-server:9345') }}"
+
+    # RKE2 token should be passed securely, not in clear text
+    # rke2_token: "{{ lookup('ansible.builtin.env', 'RKE2_TOKEN') }}"
+
+    # Optional configuration
+    rke2_worker_node_labels:
+      - "node.kubernetes.io/worker=true"
+      - "topology.kubernetes.io/zone=default"
+
+  pre_tasks:
+    - name: Verify RKE2 token is provided
+      fail:
+        msg: "RKE2 token is required. Set it as an environment variable: export ANSIBLE_EXTRA_VARS='rke2_token=your-token'"
+      when: rke2_token is not defined or rke2_token | length == 0
+
+  roles:
+    - role: rke2-worker

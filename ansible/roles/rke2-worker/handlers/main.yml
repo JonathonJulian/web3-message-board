@@ -1,0 +1,8 @@
+---
+# Handlers for rke2-worker role
+
+- name: restart rke2-agent
+  systemd:
+    name: "{{ rke2_worker_service_name }}"
+    state: restarted
+    daemon_reload: yes

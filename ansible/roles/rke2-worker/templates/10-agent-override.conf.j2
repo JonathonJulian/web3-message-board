@@ -1,0 +1,10 @@
+[Service]
+# Ensure RKE2 agent restarts on failure and has proper resource limits
+Restart=always
+RestartSec=5
+LimitNOFILE=1048576
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+TimeoutStartSec=0
+Environment="INSTALL_RKE2_TYPE=agent"

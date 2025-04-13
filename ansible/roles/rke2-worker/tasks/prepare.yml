@@ -1,0 +1,61 @@
+---
+# Preparation tasks for RKE2 worker installation
+
+- name: Disable swap
+  command: swapoff -a
+  changed_when: false
+
+- name: Ensure swap is disabled in fstab
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
+    backup: yes
+
+- name: Load required kernel modules
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - br_netfilter
+    - overlay
+    - iptable_filter
+    - iptable_nat
+
+- name: Set kernel modules to load on boot
+  copy:
+    dest: "/etc/modules-load.d/rke2-k8s.conf"
+    content: |
+      br_netfilter
+      overlay
+      iptable_filter
+      iptable_nat
+    mode: '0644'
+
+- name: Set required sysctl parameters
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_file: /etc/sysctl.d/99-rke2-k8s.conf
+    reload: true
+  loop:
+    - { key: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+    - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+    - { key: 'net.ipv4.ip_forward', value: '1' }
+    - { key: 'vm.overcommit_memory', value: '1' }
+    - { key: 'vm.panic_on_oom', value: '0' }
+    - { key: 'kernel.panic', value: '10' }
+    - { key: 'kernel.panic_on_oops', value: '1' }
+    - { key: 'kernel.keys.root_maxkeys', value: '1000000' }
+    - { key: 'kernel.keys.root_maxbytes', value: '25000000' }
+
+- name: Install required packages
+  package:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - curl
+    - ca-certificates
+    - iptables
+    - rsync

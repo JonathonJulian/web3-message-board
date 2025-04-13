@@ -1,0 +1,99 @@
+---
+# Main tasks file for rke2-worker role
+
+- name: Include OS-specific variables
+  include_vars: "{{ item }}"
+  with_first_found:
+    - "{{ ansible_distribution|lower }}-{{ ansible_distribution_major_version }}.yml"
+    - "{{ ansible_distribution|lower }}.yml"
+    - "{{ ansible_os_family|lower }}.yml"
+    - "default.yml"
+  ignore_errors: true
+
+- name: Ensure required directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ rke2_worker_config_dir }}"
+    - "{{ rke2_worker_config_dir }}/agent.yaml.d"
+
+- name: Check if RKE2 worker is already installed
+  stat:
+    path: /var/lib/rancher/rke2/agent/agent-token
+  register: rke2_worker_installed
+
+- name: Import prepare tasks
+  import_tasks: prepare.yml
+  when: not rke2_worker_installed.stat.exists
+
+- name: Create RKE2 agent config.yaml
+  template:
+    src: config.yaml.j2
+    dest: "{{ rke2_worker_config_dir }}/config.yaml"
+    owner: root
+    group: root
+    mode: '0600'
+  notify: restart rke2-agent
+
+- name: Validate token is provided
+  fail:
+    msg: "RKE2 token is required but not provided (rke2_token)"
+  when: rke2_token is not defined or rke2_token | length == 0
+
+- name: Add RKE2 token file
+  copy:
+    content: "{{ rke2_token }}"
+    dest: "{{ rke2_worker_config_dir }}/agent-token"
+    owner: root
+    group: root
+    mode: '0600'
+  notify: restart rke2-agent
+  no_log: true  # Hide token in logs
+
+- name: Install RKE2 worker
+  shell: |
+    curl -sfL https://get.rke2.io | \
+      INSTALL_RKE2_TYPE="agent" \
+      INSTALL_RKE2_VERSION="{{ rke2_worker_version }}" \
+      INSTALL_RKE2_CHANNEL="{{ rke2_worker_channel }}" \
+      sh -
+  args:
+    creates: /usr/local/bin/rke2
+  notify: restart rke2-agent
+  when: not rke2_worker_installed.stat.exists
+
+- name: Create RKE2 agent systemd override directory
+  file:
+    path: /etc/systemd/system/{{ rke2_worker_service_name }}.service.d
+    state: directory
+    mode: '0755'
+
+- name: Configure systemd override for RKE2 agent
+  template:
+    src: 10-agent-override.conf.j2
+    dest: /etc/systemd/system/{{ rke2_worker_service_name }}.service.d/10-agent-override.conf
+    mode: '0644'
+  notify: restart rke2-agent
+
+- name: Enable and start RKE2 agent service
+  systemd:
+    name: "{{ rke2_worker_service_name }}"
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Wait for RKE2 worker to be ready
+  wait_for:
+    path: /var/lib/rancher/rke2/agent/agent-token
+    state: present
+    timeout: 300
+
+- name: Add users to rke2 group for kubectl access
+  user:
+    name: "{{ item }}"
+    groups: rke2
+    append: yes
+  loop: "{{ rke2_worker_kubectl_users }}"
+  when: rke2_worker_kubectl_users | length > 0

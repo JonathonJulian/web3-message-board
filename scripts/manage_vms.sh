@@ -12,6 +12,7 @@ DISK_SIZE_GB=""
 CPU=""
 MEMORY=""
 STORAGE_CLASS="SSD"  # Default storage class
+RKE2_WORKER="false"  # Default: not a RKE2 worker
 
 # Parse named parameters
 while [[ $# -gt 0 ]]; do
@@ -54,6 +55,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --storage-class=*)
       STORAGE_CLASS="${1#*=}"
+      shift
+      ;;
+    --rke2-worker=*)
+      RKE2_WORKER="${1#*=}"
       shift
       ;;
     *)
@@ -144,6 +149,7 @@ function add_vm() {
   local cpu="$7"
   local memory="$8"
   local storage_class="$9"
+  local rke2_worker="${10}"
 
   echo "Adding VM: $vm_name with network type: $network_type"
   if [[ "$network_type" == "static" ]]; then
@@ -160,6 +166,9 @@ function add_vm() {
   fi
   if [[ -n "$storage_class" ]]; then
     echo "Storage class: $storage_class"
+  fi
+  if [[ "$rke2_worker" == "true" ]]; then
+    echo "VM will be configured as RKE2 worker node"
   fi
 
   # Ensure configuration file exists
@@ -211,6 +220,11 @@ function add_vm() {
   if [[ -n "$storage_class" ]]; then
     jq --arg storage "$storage_class" \
        '. += {"storage_class": $storage}' "$TEMP_FILE" > "${TEMP_FILE}.tmp" && mv "${TEMP_FILE}.tmp" "$TEMP_FILE"
+  fi
+
+  if [[ "$rke2_worker" == "true" ]]; then
+    jq --argjson rke2 true \
+       '. += {"is_rke2_worker": $rke2}' "$TEMP_FILE" > "${TEMP_FILE}.tmp" && mv "${TEMP_FILE}.tmp" "$TEMP_FILE"
   fi
 
   # Get the final VM config JSON
@@ -278,7 +292,7 @@ function apply_config() {
 # Main command handling
 case "$ACTION" in
   add)
-    add_vm "$VM_NAME" "$NETWORK_TYPE" "$IP_ADDRESS" "$SUBNET_MASK" "$SSH_PUBLIC_KEY" "$DISK_SIZE_GB" "$CPU" "$MEMORY" "$STORAGE_CLASS"
+    add_vm "$VM_NAME" "$NETWORK_TYPE" "$IP_ADDRESS" "$SUBNET_MASK" "$SSH_PUBLIC_KEY" "$DISK_SIZE_GB" "$CPU" "$MEMORY" "$STORAGE_CLASS" "$RKE2_WORKER"
     ;;
   list)
     list_vms
@@ -309,6 +323,7 @@ case "$ACTION" in
     echo "  --storage-class=<class>     - Storage class (SSD, NVME, SATA)"
     echo "  --cpu=<cores>               - Number of CPU cores (e.g., 2)"
     echo "  --memory=<GB>               - Memory in GB (e.g., 4)"
+    echo "  --rke2-worker=<true|false>  - Configure as RKE2 worker node"
     echo ""
     echo "Examples:"
     echo "  $0 add web-server-3 static 192.168.1.97 24"

@@ -168,7 +168,9 @@ resource "vsphere_virtual_machine" "vm" {
       scsi_controller_count,
       scsi_type,
       firmware,
-      pci_device_id
+      pci_device_id,
+      disk.0.io_share_count,
+      vapp.0.properties["user-data"]
     ]
   }
 }
