@@ -5,8 +5,26 @@ variable "datacenter" {
 }
 
 variable "datastore" {
-  description = "vSphere datastore name"
+  description = "vSphere default datastore name"
   type        = string
+}
+
+variable "datastore_nvme" {
+  description = "vSphere NVME datastore name"
+  type        = string
+  default     = null
+}
+
+variable "datastore_ssd" {
+  description = "vSphere SSD datastore name"
+  type        = string
+  default     = null
+}
+
+variable "datastore_sata" {
+  description = "vSphere SATA datastore name"
+  type        = string
+  default     = null
 }
 
 variable "cluster" {
@@ -39,9 +57,13 @@ variable "ovf_remote_url" {
 
 # VM configuration
 variable "vm_configs" {
-  description = "Map of VM configurations containing name, network type, and optional static IP settings"
+  description = "Map of VM configurations containing name, hardware specs, network type, and optional static IP settings"
   type = map(object({
     name         = string
+    cpu          = optional(number)
+    memory       = optional(number)
+    disk_size_gb = optional(number)
+    storage_class = optional(string, "SSD")
     network_type = optional(string, "dhcp")
     ip_address   = optional(string)
     subnet_mask  = optional(string, "24")
@@ -69,6 +91,12 @@ variable "vm_memory_override" {
   default     = null
 }
 
+variable "default_disk_size_gb" {
+  description = "Default disk size in GB to use when VM config doesn't specify it"
+  type        = number
+  default     = null
+}
+
 variable "wait_for_guest_net_timeout" {
   description = "Timeout for waiting for guest network (0 = disabled)"
   type        = number
@@ -91,7 +119,7 @@ variable "vm_domain" {
 variable "default_gateway" {
   description = "Default gateway for static IPs"
   type        = string
-  default     = "192.168.1.1"
+  default     = "192.168.1.254"
 }
 
 variable "dns_servers" {
