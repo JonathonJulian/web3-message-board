@@ -106,9 +106,10 @@ resource "vsphere_virtual_machine" "vm" {
       label            = "disk0"
       # Use a minimum of 20GB as the base size (Ubuntu Cloud image is typically smaller than this)
       # If a custom size is specified and larger than 20GB, use that instead
-      size             = max(
-        try(each.value.disk_size_gb, 20),
-        try(var.default_disk_size_gb, 20)
+      size             = coalesce(
+        lookup(each.value, "disk_size_gb", null) != null ? max(each.value.disk_size_gb, 20) : null,
+        var.default_disk_size_gb,
+        20
       )
       eagerly_scrub    = false
       thin_provisioned = true
