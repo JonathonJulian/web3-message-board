@@ -533,19 +533,26 @@ jobs:
             echo "- **Status:** ❌ Failed to push to MinIO" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Install Ansible
+      - name: Verify Ansible Availability
         if: |
           env.CONFIGS_SAVED == 'true' &&
           steps.params.outputs.action == 'add' &&
           steps.params.outputs.RKE2_WORKER == 'true'
         run: |
-          echo "Installing Ansible..."
-          sudo apt-get update
-          sudo apt-get install -y ansible python3-pip
-          # Install any additional Python modules if needed
-          pip3 install ansible jmespath
-          ansible --version
-          echo "✅ Ansible installed successfully"
+          echo "Checking for Ansible..."
+          if command -v ansible-playbook &>/dev/null; then
+            echo "✅ Ansible is already installed"
+            ansible --version
+          else
+            echo "Ansible not found, installing with pip in user mode..."
+            pip3 install --user ansible jmespath
+            export PATH=$HOME/.local/bin:$PATH
+            echo "export PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
+            ansible --version || {
+              echo "❌ Failed to install Ansible with pip. Check environment capabilities."
+              exit 1
+            }
+          fi
 
       - name: Configure RKE2 worker node
         if: |
@@ -553,27 +560,46 @@ jobs:
           steps.params.outputs.action == 'add' &&
           steps.params.outputs.RKE2_WORKER == 'true'
         run: |
-          # Get the VM IP address from status file
-          VM_IP=$(jq -r '.[] | select(.key == "${{ steps.params.outputs.VM_NAME }}") | .ip' /tmp/vm_status.json)
+          # Get the VM IP address from status file - fix variable interpolation
+          VM_NAME="${{ steps.params.outputs.VM_NAME }}"
+          VM_IP=$(jq -r --arg vm "$VM_NAME" '.[] | select(.key == $vm) | .ip' /tmp/vm_status.json)
 
           if [[ -z "$VM_IP" || "$VM_IP" == "null" ]]; then
-            echo "❌ Could not find IP address for VM ${{ steps.params.outputs.VM_NAME }}"
+            echo "❌ Could not find IP address for VM $VM_NAME"
+            # Debug output
+            echo "Debug: Current status file contents:"
+            jq . /tmp/vm_status.json
             exit 1
           fi
 
           echo "Configuring RKE2 worker node at $VM_IP..."
 
+          # Ensure correct gateway is configured on the VM
+          ssh ubuntu@$VM_IP "sudo sed -i 's/via: 192.168.1.1/via: 192.168.1.254/' /etc/netplan/60-static-ip.yaml && sudo netplan apply" || {
+            echo "⚠️ Warning: Could not update gateway configuration. Internet connectivity might be limited."
+          }
+
+          # Verify GitHub connectivity
+          if ! ssh ubuntu@$VM_IP "curl -s -o /dev/null -w '%{http_code}' https://github.com"; then
+            echo "⚠️ Warning: VM cannot reach GitHub. Installation might fail."
+          else
+            echo "✅ VM has connectivity to GitHub."
+          fi
+
           # Generate Ansible inventory file
           cat > /tmp/ansible_inventory.ini << EOF
           [rke2_workers]
-          ${{ steps.params.outputs.VM_NAME }} ansible_host=$VM_IP ansible_user=ubuntu ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+          $VM_NAME ansible_host=$VM_IP ansible_user=ubuntu ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 
           [all:vars]
           ansible_python_interpreter=/usr/bin/python3
           EOF
 
+          echo "Inventory file created:"
+          cat /tmp/ansible_inventory.ini
+
           # Run Ansible playbook with RKE2 token from GitHub secret
           cd ansible
-          ansible-playbook -i /tmp/ansible_inventory.ini add-rke2-worker.yml -e "rke2_token=${{ secrets.RKE2_TOKEN }}" -e "rke2_server_url=${{ secrets.RKE2_SERVER_URL }}"
+          ansible-playbook -i /tmp/ansible_inventory.ini add-rke2-worker.yml -e "rke2_token=${{ secrets.RKE2_TOKEN }}" -e "rke2_server_url=${{ secrets.RKE2_SERVER_URL }}" -v
 
           echo "✅ RKE2 worker node configuration completed"
