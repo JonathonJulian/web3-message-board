@@ -647,12 +647,20 @@ jobs:
 
           # Install Ansible
           echo "🔧 Setting up Ansible..."
-          sudo apt update
-          sudo apt install -y ansible
-          echo "✅ Ansible installed"
-          ansible --version
+          echo "Current user: $(whoami)"
           echo "Current PATH: $PATH"
+          echo "Home directory: $HOME"
+          echo "Python version: $(python3 --version)"
+          echo "Pip version: $(python3 -m pip --version)"
+          echo "Installing Ansible..."
+          python3 -m pip install --user ansible
+          echo "Updating PATH to include user bin directory..."
+          export PATH=$HOME/.local/bin:$PATH
+          echo "New PATH: $PATH"
+          echo "Verifying Ansible installation..."
           which ansible
+          ansible --version || echo "Ansible installation failed"
+          echo "✅ Ansible setup complete (or error logged above)"
 
           # Create Ansible inventory file
           cat > /tmp/ansible_inventory.ini << EOF
