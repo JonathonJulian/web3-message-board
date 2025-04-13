@@ -97,6 +97,7 @@ jobs:
         run: |
           echo "ACTION=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
           echo "VM_NAME=${{ github.event.inputs.vm_name }}" >> $GITHUB_OUTPUT
+          echo "NETWORK_TYPE=static" >> $GITHUB_OUTPUT  # Always use static IP
           echo "IP_ADDRESS=${{ github.event.inputs.ip_address }}" >> $GITHUB_OUTPUT
           echo "SUBNET_MASK=${{ github.event.inputs.subnet_mask || '24' }}" >> $GITHUB_OUTPUT
           echo "CPU=${{ github.event.inputs.cpu || '2' }}" >> $GITHUB_OUTPUT
@@ -188,6 +189,7 @@ jobs:
           bash ./scripts/manage_vms.sh \
             --action="${{ steps.params.outputs.ACTION }}" \
             --vm-name="${{ steps.params.outputs.VM_NAME }}" \
+            --network-type="${{ steps.params.outputs.NETWORK_TYPE }}" \
             --ip-address="${{ steps.params.outputs.IP_ADDRESS }}" \
             --subnet-mask="${{ steps.params.outputs.SUBNET_MASK }}" \
             --ssh-public-key="${{ steps.params.outputs.SSH_PUBLIC_KEY }}" \
@@ -229,6 +231,7 @@ jobs:
                 bash ./scripts/manage_vms.sh \
                   --action="update" \
                   --vm-name="$VM" \
+                  --network-type="static" \
                   --ip-address="$VM_IP" \
                   --subnet-mask="$VM_SUBNET" \
                   --cpu="$VM_CPU" \
@@ -472,7 +475,7 @@ jobs:
 
           if [[ "$ACTION" == "add" ]]; then
             echo "- **VM Added:** \`$VM_NAME\`" >> $GITHUB_STEP_SUMMARY
-            echo "- **Network Type:** \`static\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Network Type:** \`$NETWORK_TYPE\`" >> $GITHUB_STEP_SUMMARY
             echo "- **IP Address:** \`$IP_ADDRESS/$SUBNET_MASK\`" >> $GITHUB_STEP_SUMMARY
             echo "- **CPU Cores:** \`$CPU\`" >> $GITHUB_STEP_SUMMARY
             echo "- **Memory (GB):** \`$MEMORY\`" >> $GITHUB_STEP_SUMMARY
@@ -538,7 +541,7 @@ jobs:
 
                   IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address" 2>/dev/null || echo "Unknown")
                   SUBNET_MASK=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].subnet_mask // \"24\"" 2>/dev/null || echo "24")
-                  echo "| $VM_KEY | $VM_NAME | static | $IP_ADDRESS/$SUBNET_MASK | $CPU | $MEMORY | $RKE2_STATUS |" >> $GITHUB_STEP_SUMMARY
+                  echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | $IP_ADDRESS/$SUBNET_MASK | $CPU | $MEMORY | $RKE2_STATUS |" >> $GITHUB_STEP_SUMMARY
                 fi
               done
             else
