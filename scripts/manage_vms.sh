@@ -142,7 +142,7 @@ function add_vm() {
     echo "CPU cores: $cpu"
   fi
   if [[ -n "$memory" ]]; then
-    echo "Memory: ${memory}MB"
+    echo "Memory: ${memory}GB"
   fi
 
   # Ensure configuration file exists
@@ -217,7 +217,7 @@ function add_vm() {
 function list_vms() {
   vm_configs=$(get_vm_configs)
   echo "Current VM configurations:"
-  echo "$vm_configs" | jq -r 'to_entries | .[] | "\(.key):\n  name: \(.value.name)\n  network: \(.value.network_type) \(if .value.network_type == "static" then "(\(.value.ip_address)/\(.value.subnet_mask))" else "" end)\(if .value.disk_size_gb then "\n  disk size: \(.value.disk_size_gb)GB" else "" end)\(if .value.cpu then "\n  cpu: \(.value.cpu) cores" else "" end)\(if .value.memory then "\n  memory: \(.value.memory)MB" else "" end)"'
+  echo "$vm_configs" | jq -r 'to_entries | .[] | "\(.key):\n  name: \(.value.name)\n  network: \(.value.network_type) \(if .value.network_type == "static" then "(\(.value.ip_address)/\(.value.subnet_mask))" else "" end)\(if .value.disk_size_gb then "\n  disk size: \(.value.disk_size_gb)GB" else "" end)\(if .value.cpu then "\n  cpu: \(.value.cpu) cores" else "" end)\(if .value.memory then "\n  memory: \(.value.memory)GB" else "" end)"'
 }
 
 # Remove a VM configuration
@@ -285,11 +285,11 @@ case "$ACTION" in
     echo "  --ssh-public-key=<key>      - SSH public key for VM access"
     echo "  --disk-size-gb=<size>       - Disk size in GB (e.g., 20)"
     echo "  --cpu=<cores>               - Number of CPU cores (e.g., 2)"
-    echo "  --memory=<MB>               - Memory in MB (e.g., 4096)"
+    echo "  --memory=<GB>               - Memory in GB (e.g., 4)"
     echo ""
     echo "Examples:"
     echo "  $0 add web-server-3 static 192.168.1.97 24"
-    echo "  $0 add db-server-1 dhcp --disk-size-gb=40 --cpu=4 --memory=8192"
+    echo "  $0 add db-server-1 dhcp --disk-size-gb=40 --cpu=4 --memory=8"
     echo "  $0 --action=add --vm-name=web-server-3 --network-type=static --ip-address=192.168.1.97 --disk-size-gb=30"
     echo "  $0 list"
     echo "  $0 remove web-server-1"

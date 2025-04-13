@@ -73,7 +73,14 @@ resource "vsphere_virtual_machine" "vm" {
   # VM hardware settings from vm_configs or fallback to template
   num_cpus             = try(each.value.cpu, var.vm_cpu_override != null ? var.vm_cpu_override : data.vsphere_ovf_vm_template.ubuntu_cloud.num_cpus)
   num_cores_per_socket = 1  # Explicitly set to 1 to prevent drift
-  memory               = try(each.value.memory, var.vm_memory_override != null ? var.vm_memory_override : data.vsphere_ovf_vm_template.ubuntu_cloud.memory)
+
+  # Memory - Convert from GB to MB (vSphere expects MB)
+  # For input memory values, assume GB and convert to MB. For template values, keep as is (already in MB)
+  memory               = try(
+    each.value.memory * 1024,
+    var.vm_memory_override != null ? var.vm_memory_override * 1024 : data.vsphere_ovf_vm_template.ubuntu_cloud.memory
+  )
+
   guest_id             = data.vsphere_ovf_vm_template.ubuntu_cloud.guest_id
   firmware             = data.vsphere_ovf_vm_template.ubuntu_cloud.firmware
   scsi_type            = data.vsphere_ovf_vm_template.ubuntu_cloud.scsi_type
