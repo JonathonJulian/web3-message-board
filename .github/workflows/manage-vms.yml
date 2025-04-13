@@ -207,9 +207,33 @@ jobs:
               HAS_KEY=$(jq -r ".vm_configs[\"$VM\"].ssh_public_key // \"\"" ./terraform/environments/dev/terraform.tfvars.json)
               if [[ -z "$HAS_KEY" ]]; then
                 echo "Adding SSH key to VM '$VM'"
+
+                # Extract the IP address for this VM
+                VM_IP=$(jq -r ".vm_configs[\"$VM\"].ip_address" ./terraform/environments/dev/terraform.tfvars.json)
+
+                # Skip if IP address can't be found
+                if [[ -z "$VM_IP" || "$VM_IP" == "null" ]]; then
+                  echo "Warning: Could not find IP address for VM '$VM', skipping SSH key update"
+                  continue
+                fi
+
+                echo "Using IP address: $VM_IP"
+
+                # Get other parameters for this VM for completeness
+                VM_SUBNET=$(jq -r ".vm_configs[\"$VM\"].subnet_mask // \"24\"" ./terraform/environments/dev/terraform.tfvars.json)
+                VM_CPU=$(jq -r ".vm_configs[\"$VM\"].cpu // \"2\"" ./terraform/environments/dev/terraform.tfvars.json)
+                VM_MEMORY=$(jq -r ".vm_configs[\"$VM\"].memory // \"4\"" ./terraform/environments/dev/terraform.tfvars.json)
+                VM_DISK=$(jq -r ".vm_configs[\"$VM\"].disk_size_gb // \"20\"" ./terraform/environments/dev/terraform.tfvars.json)
+
+                # Update the VM with the SSH key, passing all required parameters
                 bash ./scripts/manage_vms.sh \
-                  --action="add" \
+                  --action="update" \
                   --vm-name="$VM" \
+                  --ip-address="$VM_IP" \
+                  --subnet-mask="$VM_SUBNET" \
+                  --cpu="$VM_CPU" \
+                  --memory="$VM_MEMORY" \
+                  --disk-size-gb="$VM_DISK" \
                   --ssh-public-key="${{ steps.params.outputs.SSH_PUBLIC_KEY }}"
               fi
             done
