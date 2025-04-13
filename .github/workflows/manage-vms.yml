@@ -647,7 +647,7 @@ jobs:
 
           # Activate the existing Ansible virtual environment
           echo "🔧 Activating Ansible virtual environment..."
-          source ~/activate_ansible.sh
+          source ~/.ansible_venv/bin/activate
 
           # Verify Ansible is available
           ansible --version
