@@ -149,6 +149,17 @@ jobs:
           export AWS_SECRET_ACCESS_KEY="${{ env.AWS_SECRET_ACCESS_KEY }}"
           export AWS_EC2_METADATA_DISABLED=true
 
+          # Set Terraform variables from environment
+          export TF_VAR_vsphere_server="${{ env.VSPHERE_SERVER }}"
+          export TF_VAR_vsphere_user="${{ env.VSPHERE_USER }}"
+          export TF_VAR_vsphere_password="${{ env.VSPHERE_PASSWORD }}"
+          export TF_VAR_ssh_public_key="${{ steps.params.outputs.SSH_PUBLIC_KEY }}"
+
+          # Print which variables are being used (mask sensitive values)
+          echo "Using vSphere server: $TF_VAR_vsphere_server"
+          echo "Using vSphere user: $TF_VAR_vsphere_user"
+          echo "Using SSH public key: ${TF_VAR_ssh_public_key:0:20}... (truncated)"
+
           bash ./scripts/manage_vms.sh \
             --action="${{ steps.params.outputs.ACTION }}" \
             --vm-name="${{ steps.params.outputs.VM_NAME }}" \
