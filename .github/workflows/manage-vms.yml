@@ -1,5 +1,5 @@
 name: Manage vSphere VMs
-run-name: ${{ github.event.inputs.action }} VM ${{ github.event.inputs.vm_name }}
+run-name: ${{ github.event.inputs.action }} VM ${{ github.event.inputs.vm_name }}${{ github.event.inputs.rke2_worker == 'true' && ' as RKE2 worker' || '' }}
 
 on:
   workflow_dispatch:
@@ -80,7 +80,7 @@ env:
 
 jobs:
   manage-vms:
-    name: ${{ github.event.inputs.action }} VM ${{ github.event.inputs.vm_name }}
+    name: ${{ github.event.inputs.action }} VM ${{ github.event.inputs.vm_name }}${{ github.event.inputs.rke2_worker == 'true' && ' as RKE2 worker' || '' }}
     runs-on: self-hosted
 
     steps:
