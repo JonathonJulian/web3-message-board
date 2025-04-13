@@ -533,6 +533,30 @@ jobs:
             echo "- **Status:** ❌ Failed to push to MinIO" >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Prepare Environment for RKE2 Configuration
+        if: |
+          env.CONFIGS_SAVED == 'true' &&
+          steps.params.outputs.action == 'add' &&
+          steps.params.outputs.RKE2_WORKER == 'true'
+        run: |
+          echo "Preparing environment for RKE2 worker node configuration..."
+
+          # Ensure jq is installed (needed for JSON processing)
+          if ! command -v jq &>/dev/null; then
+            echo "Installing jq..."
+            apt-get update && apt-get install -y jq || sudo apt-get update && sudo apt-get install -y jq
+          fi
+
+          # Pre-install any required Python packages for Ansible
+          if command -v apt-get &>/dev/null; then
+            echo "Installing Python requirements..."
+            apt-get update && apt-get install -y python3-jmespath python3-yaml || {
+              sudo apt-get update && sudo apt-get install -y python3-jmespath python3-yaml
+            }
+          fi
+
+          echo "Environment preparation completed"
+
       - name: Verify Ansible Availability
         if: |
           env.CONFIGS_SAVED == 'true' &&
@@ -544,14 +568,23 @@ jobs:
             echo "✅ Ansible is already installed"
             ansible --version
           else
-            echo "Ansible not found, installing with pip in user mode..."
-            pip3 install --user ansible jmespath
-            export PATH=$HOME/.local/bin:$PATH
-            echo "export PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
-            ansible --version || {
-              echo "❌ Failed to install Ansible with pip. Check environment capabilities."
+            echo "Ansible not found, installing with apt..."
+            # Try to install without sudo first
+            if command -v apt-get &>/dev/null; then
+              # First try without sudo
+              apt-get update && apt-get install -y ansible || {
+                # If that fails, try with sudo
+                echo "First install attempt failed, trying with sudo..."
+                sudo apt-get update && sudo apt-get install -y ansible || {
+                  echo "❌ Failed to install Ansible with apt-get. Try manually installing on the runner."
+                  exit 1
+                }
+              }
+            else
+              echo "❌ apt-get not found. Please manually install Ansible on the runner."
               exit 1
-            }
+            fi
+            ansible --version
           fi
 
       - name: Configure RKE2 worker node
