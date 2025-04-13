@@ -262,11 +262,26 @@ jobs:
           (steps.params.outputs.action == 'add' || steps.params.outputs.action == 'apply')
         id: wait_for_vms
         run: |
+          # Additional debugging info about inputs
+          echo "===== DEBUGGING INPUT PARAMETERS ====="
+          echo "Action: ${{ steps.params.outputs.ACTION }}"
+          echo "VM Name: ${{ steps.params.outputs.VM_NAME }}"
+          echo "IP Address (from input): ${{ steps.params.outputs.IP_ADDRESS }}"
+          echo "Subnet Mask: ${{ steps.params.outputs.SUBNET_MASK }}"
+
           # Create a status file for the summary
           echo '[]' > /tmp/vm_status.json
 
           # Get VM configurations
           VM_CONFIGS=$(jq -r '.vm_configs' /tmp/vm_configs.json)
+
+          # Print the VM configurations for debugging
+          echo "===== DEBUGGING VM CONFIGURATIONS ====="
+          cat /tmp/vm_configs.json
+
+          # Show the Terraform variables file that was used
+          echo "===== TERRAFORM CONFIG FILE CONTENT ====="
+          cat ./terraform/environments/dev/terraform.tfvars.json
 
           # Initialize status array
           STATUS_ARRAY=()
