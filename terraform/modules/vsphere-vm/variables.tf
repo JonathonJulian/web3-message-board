@@ -100,9 +100,9 @@ variable "vm_memory_override" {
 }
 
 variable "default_disk_size_gb" {
-  description = "Default disk size in GB to use when VM config doesn't specify it (min 20GB for Ubuntu 24.04 Noble)"
+  description = "Default disk size in GB to use when VM config doesn't specify it"
   type        = number
-  default     = 20
+  default     = null
 }
 
 variable "wait_for_guest_net_timeout" {

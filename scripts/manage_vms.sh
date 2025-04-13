@@ -11,6 +11,7 @@ SSH_PUBLIC_KEY=""
 DISK_SIZE_GB=""
 CPU=""
 MEMORY=""
+STORAGE_CLASS="SSD"  # Default storage class
 
 # Parse named parameters
 while [[ $# -gt 0 ]]; do
@@ -49,6 +50,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --memory=*)
       MEMORY="${1#*=}"
+      shift
+      ;;
+    --storage-class=*)
+      STORAGE_CLASS="${1#*=}"
       shift
       ;;
     *)
@@ -130,6 +135,7 @@ function add_vm() {
   local disk_size_gb="$6"
   local cpu="$7"
   local memory="$8"
+  local storage_class="$9"
 
   echo "Adding VM: $vm_name with network type: $network_type"
   if [[ "$network_type" == "static" ]]; then
@@ -143,6 +149,9 @@ function add_vm() {
   fi
   if [[ -n "$memory" ]]; then
     echo "Memory: ${memory}GB"
+  fi
+  if [[ -n "$storage_class" ]]; then
+    echo "Storage class: $storage_class"
   fi
 
   # Ensure configuration file exists
@@ -189,6 +198,11 @@ function add_vm() {
   if [[ -n "$memory" ]]; then
     jq --argjson mem_val "$memory" \
        '. += {"memory": $mem_val}' "$TEMP_FILE" > "${TEMP_FILE}.tmp" && mv "${TEMP_FILE}.tmp" "$TEMP_FILE"
+  fi
+
+  if [[ -n "$storage_class" ]]; then
+    jq --arg storage "$storage_class" \
+       '. += {"storage_class": $storage}' "$TEMP_FILE" > "${TEMP_FILE}.tmp" && mv "${TEMP_FILE}.tmp" "$TEMP_FILE"
   fi
 
   # Get the final VM config JSON
@@ -256,7 +270,7 @@ function apply_config() {
 # Main command handling
 case "$ACTION" in
   add)
-    add_vm "$VM_NAME" "$NETWORK_TYPE" "$IP_ADDRESS" "$SUBNET_MASK" "$SSH_PUBLIC_KEY" "$DISK_SIZE_GB" "$CPU" "$MEMORY"
+    add_vm "$VM_NAME" "$NETWORK_TYPE" "$IP_ADDRESS" "$SUBNET_MASK" "$SSH_PUBLIC_KEY" "$DISK_SIZE_GB" "$CPU" "$MEMORY" "$STORAGE_CLASS"
     ;;
   list)
     list_vms
@@ -284,6 +298,7 @@ case "$ACTION" in
     echo "  --subnet-mask=<mask>        - Subnet mask for static networking"
     echo "  --ssh-public-key=<key>      - SSH public key for VM access"
     echo "  --disk-size-gb=<size>       - Disk size in GB (e.g., 20)"
+    echo "  --storage-class=<class>     - Storage class (SSD, NVME, SATA)"
     echo "  --cpu=<cores>               - Number of CPU cores (e.g., 2)"
     echo "  --memory=<GB>               - Memory in GB (e.g., 4)"
     echo ""
