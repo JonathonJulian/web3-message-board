@@ -29,6 +29,24 @@ variable "datastore" {
   default     = "SSD"
 }
 
+variable "datastore_nvme" {
+  description = "vSphere NVME datastore name"
+  type        = string
+  default     = "NVME"
+}
+
+variable "datastore_ssd" {
+  description = "vSphere SSD datastore name"
+  type        = string
+  default     = "SSD"
+}
+
+variable "datastore_sata" {
+  description = "vSphere SATA datastore name"
+  type        = string
+  default     = "SATA"
+}
+
 variable "cluster" {
   description = "vSphere cluster name"
   type        = string
@@ -76,4 +94,11 @@ variable "dns_servers" {
 variable "ssh_public_key" {
   description = "SSH public key for the ubuntu user"
   type        = string
+}
+
+# Default hardware settings
+variable "default_disk_size_gb" {
+  description = "Default disk size in GB for VMs that don't specify it"
+  type        = number
+  default     = 20
 }

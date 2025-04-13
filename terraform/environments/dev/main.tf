@@ -2,7 +2,7 @@ terraform {
   required_providers {
     vsphere = {
       source  = "hashicorp/vsphere"
-      version = "~> 2.2.0"
+      version = "~> 2.11.1"
     }
     aws = {
       source  = "hashicorp/aws"
@@ -45,6 +45,9 @@ module "vsphere_vms" {
   # vSphere infrastructure
   datacenter = var.datacenter
   datastore  = var.datastore
+  datastore_nvme = var.datastore_nvme
+  datastore_ssd = var.datastore_ssd
+  datastore_sata = var.datastore_sata
   cluster    = var.cluster
   network    = var.network
   host       = var.host
@@ -56,6 +59,7 @@ module "vsphere_vms" {
   # Optional VM hardware overrides
   vm_cpu_override    = 2
   vm_memory_override = 4096
+  default_disk_size_gb = var.default_disk_size_gb
 
   # Network settings
   vm_domain      = var.vm_domain
@@ -85,6 +89,10 @@ variable "vm_configs" {
     network_type = string
     ip_address   = optional(string)
     subnet_mask  = optional(string)
+    cpu          = optional(number)
+    memory       = optional(number)
+    disk_size_gb = optional(number)
+    storage_class = optional(string)
   }))
   default = {}
 }
