@@ -1,4 +1,5 @@
 name: Manage vSphere VMs
+run-name: ${{ github.event.inputs.action }} VM ${{ github.event.inputs.vm_name }}
 
 on:
   workflow_dispatch:
@@ -82,6 +83,7 @@ env:
 
 jobs:
   manage-vms:
+    name: ${{ github.event.inputs.action }} VM ${{ github.event.inputs.vm_name }}
     runs-on: self-hosted
 
     steps:
