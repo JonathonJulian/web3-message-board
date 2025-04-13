@@ -603,40 +603,6 @@ jobs:
           if_key_exists: replace
 
       # --------------------------------
-      # Install Ansible and dependencies
-      # --------------------------------
-      - name: Install Ansible
-        if: |
-          env.CONFIGS_SAVED == 'true' &&
-          steps.params.outputs.action == 'add' &&
-          steps.params.outputs.RKE2_WORKER == 'true'
-        run: |
-          echo "🔧 Installing Ansible and dependencies..."
-
-          # Install Python and Ansible
-          if command -v apt-get &>/dev/null; then
-            # Ubuntu/Debian
-            sudo apt-get update
-            sudo apt-get install -y python3 python3-pip
-            sudo pip3 install ansible
-          elif command -v brew &>/dev/null; then
-            # macOS
-            brew install ansible
-          else
-            # Try pip directly as a fallback
-            pip3 install --user ansible
-            # Add user bin to PATH
-            export PATH="$HOME/.local/bin:$PATH"
-          fi
-
-          # Verify installation
-          ansible --version
-          ansible-playbook --version
-
-          # Create necessary directories
-          mkdir -p ~/.ansible/roles
-
-      # --------------------------------
       # Run Ansible to configure RKE2 worker node
       # --------------------------------
       - name: Configure RKE2 worker node with Ansible
@@ -680,27 +646,8 @@ jobs:
           echo "VM IP address: $VM_IP"
 
           # Activate the existing Ansible virtual environment
-          if [ -f ~/activate_ansible.sh ]; then
-            echo "🔧 Activating Ansible virtual environment..."
-            source ~/activate_ansible.sh
-          else
-            echo "⚠️ Ansible activation script not found, installing Ansible..."
-            # Install Python and Ansible if needed
-            if command -v apt-get &>/dev/null; then
-              # Ubuntu/Debian
-              sudo apt-get update
-              sudo apt-get install -y python3 python3-pip
-              sudo pip3 install ansible
-            elif command -v brew &>/dev/null; then
-              # macOS
-              brew install ansible
-            else
-              # Try pip directly as a fallback
-              pip3 install --user ansible
-              # Add user bin to PATH
-              export PATH="$HOME/.local/bin:$PATH"
-            fi
-          fi
+          echo "🔧 Activating Ansible virtual environment..."
+          source ~/activate_ansible.sh
 
           # Verify Ansible is available
           ansible --version
