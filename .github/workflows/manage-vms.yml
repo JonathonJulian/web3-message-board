@@ -104,8 +104,22 @@ jobs:
           echo "SSH_PUBLIC_KEY=${{ github.event.inputs.ssh_public_key }}" >> $GITHUB_OUTPUT
           echo "DISK_SIZE_GB=${{ github.event.inputs.disk_size_gb }}" >> $GITHUB_OUTPUT
           echo "STORAGE_CLASS=${{ github.event.inputs.storage_class }}" >> $GITHUB_OUTPUT
-          echo "CPU=${{ github.event.inputs.cpu }}" >> $GITHUB_OUTPUT
-          echo "MEMORY=${{ github.event.inputs.memory }}" >> $GITHUB_OUTPUT
+
+          # Ensure CPU is at least 2 cores
+          CPU="${{ github.event.inputs.cpu }}"
+          if [[ -z "$CPU" || "$CPU" -lt 2 ]]; then
+            CPU=2
+            echo "Setting CPU to minimum required value: 2"
+          fi
+          echo "CPU=$CPU" >> $GITHUB_OUTPUT
+
+          # Ensure memory is at least 2GB for Ubuntu 24.04 (Noble)
+          MEMORY="${{ github.event.inputs.memory }}"
+          if [[ -z "$MEMORY" || "$MEMORY" -lt 2 ]]; then
+            MEMORY=2
+            echo "Setting memory to minimum required value: 2GB"
+          fi
+          echo "MEMORY=$MEMORY" >> $GITHUB_OUTPUT
 
       - name: Pull VM configurations from MinIO
         id: pull_configs
@@ -372,6 +386,9 @@ jobs:
             if [[ "$NETWORK_TYPE" == "static" ]]; then
               echo "- **IP Address:** \`$IP_ADDRESS/$SUBNET_MASK\`" >> $GITHUB_STEP_SUMMARY
             fi
+            echo "- **CPU Cores:** \`$CPU\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Memory (GB):** \`$MEMORY\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Disk Size (GB):** \`$DISK_SIZE_GB\`" >> $GITHUB_STEP_SUMMARY
           elif [[ "$ACTION" == "remove" ]]; then
             echo "- **VM Removed:** \`$VM_NAME\`" >> $GITHUB_STEP_SUMMARY
           fi
@@ -407,8 +424,8 @@ jobs:
           elif [[ "${{ env.CONFIGS_SAVED }}" == "true" ]]; then
             echo "## Current VM Configurations" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| VM Key | Name | Network Type | IP Address |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|------|-------------|------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| VM Key | Name | Network Type | IP Address | CPU | Memory (GB) |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|------|-------------|------------|-----|-------------|" >> $GITHUB_STEP_SUMMARY
 
             # Process the configurations with better error handling
             if [[ -f "/tmp/vm_configs.json" ]] && jq -e . /tmp/vm_configs.json > /dev/null 2>&1; then
@@ -418,17 +435,20 @@ jobs:
                 if [[ -n "$VM_KEY" ]]; then
                   VM_NAME=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].name" 2>/dev/null || echo "Unknown")
                   NETWORK_TYPE=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].network_type" 2>/dev/null || echo "Unknown")
+                  CPU=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].cpu // \"1\"" 2>/dev/null || echo "1")
+                  MEMORY=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].memory // \"1\"" 2>/dev/null || echo "1")
+
                   if [[ "$NETWORK_TYPE" == "static" ]]; then
                     IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address" 2>/dev/null || echo "Unknown")
                     SUBNET_MASK=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].subnet_mask // \"24\"" 2>/dev/null || echo "24")
-                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | $IP_ADDRESS/$SUBNET_MASK |" >> $GITHUB_STEP_SUMMARY
+                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | $IP_ADDRESS/$SUBNET_MASK | $CPU | $MEMORY |" >> $GITHUB_STEP_SUMMARY
                   else
-                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | DHCP |" >> $GITHUB_STEP_SUMMARY
+                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | DHCP | $CPU | $MEMORY |" >> $GITHUB_STEP_SUMMARY
                   fi
                 fi
               done
             else
-              echo "| ⚠️ Error | Error processing configuration file | - | - |" >> $GITHUB_STEP_SUMMARY
+              echo "| ⚠️ Error | Error processing configuration file | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
             fi
           else
             echo "No VM configurations found." >> $GITHUB_STEP_SUMMARY
