@@ -286,8 +286,16 @@ jobs:
           echo "Waiting 60 seconds for VMs to complete initialization..."
           sleep 60
 
-          # Loop through each VM
-          for VM_KEY in $(echo "$VM_CONFIGS" | jq -r 'keys[]'); do
+          # If this is an add action, only check the VM being added
+          if [[ "${{ steps.params.outputs.action }}" == "add" ]]; then
+            VM_KEY="${{ steps.params.outputs.VM_NAME }}"
+
+            # Verify the VM exists in configs
+            if ! echo "$VM_CONFIGS" | jq -e --arg key "$VM_KEY" '.[$key]' > /dev/null; then
+              echo "❌ Error: VM $VM_KEY not found in configuration"
+              exit 1
+            fi
+
             VM_NAME=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].name")
             IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address")
             IS_RKE2=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].is_rke2_worker // \"false\"")
@@ -342,7 +350,65 @@ jobs:
               --arg ssh_command "$SSH_COMMAND" \
               --arg is_rke2 "$IS_RKE2" \
               '{name: $name, key: $key, ip: $ip, status: $status, ssh_status: $ssh_status, ssh_command: $ssh_command, is_rke2_worker: $is_rke2}')")
-          done
+          else
+            # For apply action, loop through each VM (original behavior)
+            for VM_KEY in $(echo "$VM_CONFIGS" | jq -r 'keys[]'); do
+              VM_NAME=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].name")
+              IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address")
+              IS_RKE2=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].is_rke2_worker // \"false\"")
+
+              echo "Checking if VM $VM_NAME ($IP_ADDRESS) is online..."
+
+              # Check SSH port (port 22) without requiring ping
+              echo "Attempting to connect to SSH port (22)..."
+              if timeout 5 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
+                echo "✅ VM $VM_NAME ($IP_ADDRESS) has SSH port open and is responsive"
+                STATUS="Online"
+                SSH_STATUS="Available"
+              else
+                echo "Initial SSH check failed, trying again with longer timeout..."
+
+                # Try more attempts with longer timeouts
+                MAX_ATTEMPTS=12
+                SUCCESS=false
+
+                for ((i=1; i<=MAX_ATTEMPTS; i++)); do
+                  echo "TCP connection attempt $i/$MAX_ATTEMPTS for $IP_ADDRESS:22..."
+                  if timeout 10 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
+                    echo "✅ VM $VM_NAME ($IP_ADDRESS) is online after $i attempts"
+                    STATUS="Online"
+                    SSH_STATUS="Available"
+                    SUCCESS=true
+                    break
+                  fi
+
+                  echo "Attempt $i/$MAX_ATTEMPTS: VM $VM_NAME ($IP_ADDRESS) not responding yet"
+                  sleep 15  # 15 seconds between attempts (total 3 minutes max)
+                done
+
+                if [[ "$SUCCESS" == "false" ]]; then
+                  echo "❌ Could not connect to VM $VM_NAME ($IP_ADDRESS)"
+                  echo "Note: VM may still be booting or port 22 may not be open yet"
+                  STATUS="Pending (No Connection)"
+                  SSH_STATUS="Unavailable"
+                fi
+              fi
+
+              # Generate SSH command
+              SSH_COMMAND="ssh ubuntu@$IP_ADDRESS"
+
+              # Add to status array for summary
+              STATUS_ARRAY+=("$(jq -n \
+                --arg name "$VM_NAME" \
+                --arg key "$VM_KEY" \
+                --arg ip "$IP_ADDRESS" \
+                --arg status "$STATUS" \
+                --arg ssh_status "$SSH_STATUS" \
+                --arg ssh_command "$SSH_COMMAND" \
+                --arg is_rke2 "$IS_RKE2" \
+                '{name: $name, key: $key, ip: $ip, status: $status, ssh_status: $ssh_status, ssh_command: $ssh_command, is_rke2_worker: $is_rke2}')")
+            done
+          fi
 
           # Combine status objects into JSON array and save - fixed to properly format JSON
           # Instead of concatenating strings, use jq to properly build the array
@@ -466,6 +532,20 @@ jobs:
           elif [[ "${{ env.MINIO_PUSH_STATUS }}" == "failed" ]]; then
             echo "- **Status:** ❌ Failed to push to MinIO" >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Install Ansible
+        if: |
+          env.CONFIGS_SAVED == 'true' &&
+          steps.params.outputs.action == 'add' &&
+          steps.params.outputs.RKE2_WORKER == 'true'
+        run: |
+          echo "Installing Ansible..."
+          sudo apt-get update
+          sudo apt-get install -y ansible python3-pip
+          # Install any additional Python modules if needed
+          pip3 install ansible jmespath
+          ansible --version
+          echo "✅ Ansible installed successfully"
 
       - name: Configure RKE2 worker node
         if: |
