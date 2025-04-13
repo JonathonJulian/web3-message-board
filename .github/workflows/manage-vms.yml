@@ -17,16 +17,8 @@ on:
         description: "VM name (required for any operation)"
         required: true
         type: string
-      network_type:
-        description: "Network configuration type"
-        required: true
-        default: "static"
-        type: choice
-        options:
-          - static
-          - dhcp
       ip_address:
-        description: "Static IP address (required if network_type is static)"
+        description: "Static IP address (required)"
         required: false
         type: string
       subnet_mask:
@@ -105,7 +97,7 @@ jobs:
         run: |
           echo "ACTION=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
           echo "VM_NAME=${{ github.event.inputs.vm_name }}" >> $GITHUB_OUTPUT
-          echo "NETWORK_TYPE=${{ github.event.inputs.network_type }}" >> $GITHUB_OUTPUT
+          echo "NETWORK_TYPE=static" >> $GITHUB_OUTPUT
           echo "IP_ADDRESS=${{ github.event.inputs.ip_address }}" >> $GITHUB_OUTPUT
           echo "SUBNET_MASK=${{ github.event.inputs.subnet_mask }}" >> $GITHUB_OUTPUT
           echo "SSH_PUBLIC_KEY=${{ github.event.inputs.ssh_public_key }}" >> $GITHUB_OUTPUT
@@ -192,14 +184,14 @@ jobs:
           bash ./scripts/manage_vms.sh \
             --action="${{ steps.params.outputs.ACTION }}" \
             --vm-name="${{ steps.params.outputs.VM_NAME }}" \
-            --network-type="${{ steps.params.outputs.NETWORK_TYPE }}" \
             --ip-address="${{ steps.params.outputs.IP_ADDRESS }}" \
             --subnet-mask="${{ steps.params.outputs.SUBNET_MASK }}" \
             --ssh-public-key="${{ steps.params.outputs.SSH_PUBLIC_KEY }}" \
             --disk-size-gb="${{ steps.params.outputs.DISK_SIZE_GB }}" \
             --storage-class="${{ steps.params.outputs.STORAGE_CLASS }}" \
             --cpu="${{ steps.params.outputs.CPU }}" \
-            --memory="${{ steps.params.outputs.MEMORY }}"
+            --memory="${{ steps.params.outputs.MEMORY }}" \
+            --rke2-worker="${{ steps.params.outputs.RKE2_WORKER }}"
 
           # If we're adding a VM, make sure we also update all other VMs to have SSH keys for consistency
           if [[ "${{ steps.params.outputs.ACTION }}" == "add" || "${{ steps.params.outputs.ACTION }}" == "apply" ]] && [[ -n "${{ steps.params.outputs.SSH_PUBLIC_KEY }}" ]]; then
@@ -297,71 +289,59 @@ jobs:
           # Loop through each VM
           for VM_KEY in $(echo "$VM_CONFIGS" | jq -r 'keys[]'); do
             VM_NAME=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].name")
-            NETWORK_TYPE=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].network_type")
+            IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address")
+            IS_RKE2=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].is_rke2_worker // \"false\"")
 
-            if [[ "$NETWORK_TYPE" == "static" ]]; then
-              IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address")
+            echo "Checking if VM $VM_NAME ($IP_ADDRESS) is online..."
 
-              echo "Checking if VM $VM_NAME ($IP_ADDRESS) is online..."
-
-              # Check SSH port (port 22) without requiring ping
-              echo "Attempting to connect to SSH port (22)..."
-              if timeout 5 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
-                echo "✅ VM $VM_NAME ($IP_ADDRESS) has SSH port open and is responsive"
-                STATUS="Online"
-                SSH_STATUS="Available"
-              else
-                echo "Initial SSH check failed, trying again with longer timeout..."
-
-                # Try more attempts with longer timeouts
-                MAX_ATTEMPTS=12
-                SUCCESS=false
-
-                for ((i=1; i<=MAX_ATTEMPTS; i++)); do
-                  echo "TCP connection attempt $i/$MAX_ATTEMPTS for $IP_ADDRESS:22..."
-                  if timeout 10 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
-                    echo "✅ VM $VM_NAME ($IP_ADDRESS) is online after $i attempts"
-                    STATUS="Online"
-                    SSH_STATUS="Available"
-                    SUCCESS=true
-                    break
-                  fi
-
-                  echo "Attempt $i/$MAX_ATTEMPTS: VM $VM_NAME ($IP_ADDRESS) not responding yet"
-                  sleep 15  # 15 seconds between attempts (total 3 minutes max)
-                done
-
-                if [[ "$SUCCESS" == "false" ]]; then
-                  echo "❌ Could not connect to VM $VM_NAME ($IP_ADDRESS)"
-                  echo "Note: VM may still be booting or port 22 may not be open yet"
-                  STATUS="Pending (No Connection)"
-                  SSH_STATUS="Unavailable"
-                fi
-              fi
-
-              # Generate SSH command
-              SSH_COMMAND="ssh ubuntu@$IP_ADDRESS"
-
-              # Add to status array for summary
-              STATUS_ARRAY+=("$(jq -n \
-                --arg name "$VM_NAME" \
-                --arg key "$VM_KEY" \
-                --arg ip "$IP_ADDRESS" \
-                --arg status "$STATUS" \
-                --arg ssh_status "$SSH_STATUS" \
-                --arg ssh_command "$SSH_COMMAND" \
-                '{name: $name, key: $key, ip: $ip, status: $status, ssh_status: $ssh_status, ssh_command: $ssh_command}')")
+            # Check SSH port (port 22) without requiring ping
+            echo "Attempting to connect to SSH port (22)..."
+            if timeout 5 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
+              echo "✅ VM $VM_NAME ($IP_ADDRESS) has SSH port open and is responsive"
+              STATUS="Online"
+              SSH_STATUS="Available"
             else
-              # For DHCP VMs, we can't easily check status
-              STATUS_ARRAY+=("$(jq -n \
-                --arg name "$VM_NAME" \
-                --arg key "$VM_KEY" \
-                --arg ip "DHCP" \
-                --arg status "Unknown (DHCP)" \
-                --arg ssh_status "Unknown" \
-                --arg ssh_command "N/A - DHCP" \
-                '{name: $name, key: $key, ip: $ip, status: $status, ssh_status: $ssh_status, ssh_command: $ssh_command}')")
+              echo "Initial SSH check failed, trying again with longer timeout..."
+
+              # Try more attempts with longer timeouts
+              MAX_ATTEMPTS=12
+              SUCCESS=false
+
+              for ((i=1; i<=MAX_ATTEMPTS; i++)); do
+                echo "TCP connection attempt $i/$MAX_ATTEMPTS for $IP_ADDRESS:22..."
+                if timeout 10 bash -c "</dev/tcp/$IP_ADDRESS/22" &>/dev/null; then
+                  echo "✅ VM $VM_NAME ($IP_ADDRESS) is online after $i attempts"
+                  STATUS="Online"
+                  SSH_STATUS="Available"
+                  SUCCESS=true
+                  break
+                fi
+
+                echo "Attempt $i/$MAX_ATTEMPTS: VM $VM_NAME ($IP_ADDRESS) not responding yet"
+                sleep 15  # 15 seconds between attempts (total 3 minutes max)
+              done
+
+              if [[ "$SUCCESS" == "false" ]]; then
+                echo "❌ Could not connect to VM $VM_NAME ($IP_ADDRESS)"
+                echo "Note: VM may still be booting or port 22 may not be open yet"
+                STATUS="Pending (No Connection)"
+                SSH_STATUS="Unavailable"
+              fi
             fi
+
+            # Generate SSH command
+            SSH_COMMAND="ssh ubuntu@$IP_ADDRESS"
+
+            # Add to status array for summary
+            STATUS_ARRAY+=("$(jq -n \
+              --arg name "$VM_NAME" \
+              --arg key "$VM_KEY" \
+              --arg ip "$IP_ADDRESS" \
+              --arg status "$STATUS" \
+              --arg ssh_status "$SSH_STATUS" \
+              --arg ssh_command "$SSH_COMMAND" \
+              --arg is_rke2 "$IS_RKE2" \
+              '{name: $name, key: $key, ip: $ip, status: $status, ssh_status: $ssh_status, ssh_command: $ssh_command, is_rke2_worker: $is_rke2}')")
           done
 
           # Combine status objects into JSON array and save - fixed to properly format JSON
@@ -398,10 +378,8 @@ jobs:
 
           if [[ "$ACTION" == "add" ]]; then
             echo "- **VM Added:** \`$VM_NAME\`" >> $GITHUB_STEP_SUMMARY
-            echo "- **Network Type:** \`$NETWORK_TYPE\`" >> $GITHUB_STEP_SUMMARY
-            if [[ "$NETWORK_TYPE" == "static" ]]; then
-              echo "- **IP Address:** \`$IP_ADDRESS/$SUBNET_MASK\`" >> $GITHUB_STEP_SUMMARY
-            fi
+            echo "- **Network Type:** \`static\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **IP Address:** \`$IP_ADDRESS/$SUBNET_MASK\`" >> $GITHUB_STEP_SUMMARY
             echo "- **CPU Cores:** \`$CPU\`" >> $GITHUB_STEP_SUMMARY
             echo "- **Memory (GB):** \`$MEMORY\`" >> $GITHUB_STEP_SUMMARY
             echo "- **Disk Size (GB):** \`$DISK_SIZE_GB\`" >> $GITHUB_STEP_SUMMARY
@@ -455,7 +433,6 @@ jobs:
               for VM_KEY in $(echo "$VM_CONFIGS" | jq -r 'keys[]' 2>/dev/null || echo ""); do
                 if [[ -n "$VM_KEY" ]]; then
                   VM_NAME=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].name" 2>/dev/null || echo "Unknown")
-                  NETWORK_TYPE=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].network_type" 2>/dev/null || echo "Unknown")
                   CPU=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].cpu // \"1\"" 2>/dev/null || echo "1")
                   MEMORY=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].memory // \"1\"" 2>/dev/null || echo "1")
                   IS_RKE2=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].is_rke2_worker // \"false\"" 2>/dev/null || echo "false")
@@ -465,13 +442,9 @@ jobs:
                     RKE2_STATUS="✅"
                   fi
 
-                  if [[ "$NETWORK_TYPE" == "static" ]]; then
-                    IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address" 2>/dev/null || echo "Unknown")
-                    SUBNET_MASK=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].subnet_mask // \"24\"" 2>/dev/null || echo "24")
-                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | $IP_ADDRESS/$SUBNET_MASK | $CPU | $MEMORY | $RKE2_STATUS |" >> $GITHUB_STEP_SUMMARY
-                  else
-                    echo "| $VM_KEY | $VM_NAME | $NETWORK_TYPE | DHCP | $CPU | $MEMORY | $RKE2_STATUS |" >> $GITHUB_STEP_SUMMARY
-                  fi
+                  IP_ADDRESS=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].ip_address" 2>/dev/null || echo "Unknown")
+                  SUBNET_MASK=$(echo "$VM_CONFIGS" | jq -r ".[\"$VM_KEY\"].subnet_mask // \"24\"" 2>/dev/null || echo "24")
+                  echo "| $VM_KEY | $VM_NAME | static | $IP_ADDRESS/$SUBNET_MASK | $CPU | $MEMORY | $RKE2_STATUS |" >> $GITHUB_STEP_SUMMARY
                 fi
               done
             else
