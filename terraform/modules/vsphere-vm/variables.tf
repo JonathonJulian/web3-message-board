@@ -81,7 +81,7 @@ variable "vm_configs" {
   validation {
     condition = alltrue([
       for vm in var.vm_configs :
-        vm.memory == null || vm.memory >= 2
+        lookup(vm, "memory", null) == null ? true : tonumber(vm.memory) >= 2
     ])
     error_message = "Memory must be at least 2GB for Ubuntu 24.04 (Noble)."
   }
