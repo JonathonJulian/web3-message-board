@@ -78,9 +78,9 @@ resource "vsphere_virtual_machine" "vm" {
   firmware             = data.vsphere_ovf_vm_template.ubuntu_cloud.firmware
   scsi_type            = data.vsphere_ovf_vm_template.ubuntu_cloud.scsi_type
 
-  # Controller settings - adjust to prevent IDE conflicts
-  ide_controller_count = 0  # Disable IDE controllers completely
-  sata_controller_count = 1 # Enable SATA controllers instead
+  # Controller settings - Keep minimum required IDE controllers and add SATA
+  ide_controller_count = 1  # Minimum required by vSphere validation
+  sata_controller_count = 1 # Add SATA for CD-ROM
 
   # Network interfaces
   dynamic "network_interface" {
@@ -114,7 +114,8 @@ resource "vsphere_virtual_machine" "vm" {
     allow_unverified_ssl_cert = true
   }
 
-  # CD-ROM configuration - client device is needed for vApp properties
+  # CD-ROM configuration - use SATA controller but keep client_device true
+  # This should avoid "Connection control operation failed for disk 'ide1:0'" error
   cdrom {
     client_device = true
   }
