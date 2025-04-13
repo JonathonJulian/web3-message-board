@@ -63,7 +63,13 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     ssh_authorized_keys:
+%{ if can(tolist(ssh_key)) }
+%{~ for key in tolist(ssh_key) ~}
+      - ${key}
+%{~ endfor ~}
+%{ else }
       - ${ssh_key}
+%{ endif }
 
 package_update: true
 package_upgrade: true

@@ -138,6 +138,12 @@ variable "dns_servers" {
 
 # Authentication
 variable "ssh_public_key" {
-  description = "SSH public key for the ubuntu user"
-  type        = string
+  description = "SSH public key(s) for the ubuntu user. Can be a single key or a list of keys."
+  type        = any  # string or list(string)
+}
+
+variable "additional_ssh_keys" {
+  description = "Additional SSH public keys to add to authorized_keys"
+  type        = list(string)
+  default     = []
 }

@@ -140,7 +140,20 @@ resource "vsphere_virtual_machine" "vm" {
     properties = {
       "hostname"    = each.value.name
       "instance-id" = each.value.name
-      "public-keys" = var.ssh_public_key
+      "public-keys" = (
+        # If ssh_public_key is a string, use it directly
+        # If it's a list, join the keys with newlines
+        # Then add any additional keys
+        try(
+          tolist(var.ssh_public_key),
+          [var.ssh_public_key]
+        ) == [var.ssh_public_key] && !can(tolist(var.ssh_public_key)) ?
+        var.ssh_public_key :
+        join("\n", concat(
+          try(tolist(var.ssh_public_key), [var.ssh_public_key]),
+          var.additional_ssh_keys
+        ))
+      )
       "user-data"   = base64encode(templatefile(
         "${path.module}/templates/cloud-init.tftpl",
         {
@@ -151,7 +164,20 @@ resource "vsphere_virtual_machine" "vm" {
           subnet_mask  = try(each.value.subnet_mask, "24")
           gateway      = var.default_gateway
           dns_servers  = var.dns_servers
-          ssh_key      = var.ssh_public_key
+          ssh_key      = (
+            # If ssh_public_key is a string, use it directly
+            # If it's a list, join the keys with newlines
+            # Then add any additional keys
+            try(
+              tolist(var.ssh_public_key),
+              [var.ssh_public_key]
+            ) == [var.ssh_public_key] && !can(tolist(var.ssh_public_key)) ?
+            var.ssh_public_key :
+            join("\n", concat(
+              try(tolist(var.ssh_public_key), [var.ssh_public_key]),
+              var.additional_ssh_keys
+            ))
+          )
         }
       ))
     }
