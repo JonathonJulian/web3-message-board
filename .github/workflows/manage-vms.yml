@@ -605,201 +605,53 @@ jobs:
       # --------------------------------
       # Run Ansible to configure RKE2 worker node
       # --------------------------------
-      - name: Configure RKE2 worker node with Ansible
-        if: |
-          env.CONFIGS_SAVED == 'true' &&
-          steps.params.outputs.action == 'add' &&
-          steps.params.outputs.RKE2_WORKER == 'true'
+      - name: Initialize Ansible environment
+        id: init_ansible
+        if: ${{ inputs.rke2_worker == 'true' }}
+        run: |
+          # Debug environment information
+          echo "Current user: $(whoami)"
+          echo "Current PATH: $PATH"
+          echo "Current working directory: $(pwd)"
+
+          # Verify Ansible is available
+          ansible --version
+          which ansible
+
+          echo "ansible_env_ready=true" >> $GITHUB_OUTPUT
+
+      - name: Test SSH Connectivity from Runner
+        if: ${{ inputs.rke2_worker == 'true' }}
         env:
-          ANSIBLE_HOST_KEY_CHECKING: "false"
           RKE2_TOKEN: ${{ secrets.RKE2_TOKEN }}
           RKE2_SERVER_URL: ${{ secrets.RKE2_SERVER_URL }}
         run: |
-          echo "🚀 Starting RKE2 worker node configuration..."
-
-          # Debug: print the content of the status file
-          echo "Status file content:"
-          cat /tmp/vm_status.json
-
-          # Get the VM IP address from the status file
-          # The status file has an array of VM objects with 'ip' field
-          VM_IP=$(jq -r '.[0].ip' /tmp/vm_status.json)
-          if [ -z "$VM_IP" ] || [ "$VM_IP" == "null" ]; then
-            # Try alternative format - sometimes it's not an array
-            VM_IP=$(jq -r '.ip' /tmp/vm_status.json)
-            if [ -z "$VM_IP" ] || [ "$VM_IP" == "null" ]; then
-              # Try getting IP from the VM configs file instead
-              VM_NAME="${{ steps.params.outputs.VM_NAME }}"
-              echo "Looking for IP address of $VM_NAME in configs file..."
-              VM_IP=$(jq -r --arg vm "$VM_NAME" '.vm_configs[$vm].ip_address' /tmp/vm_configs.json)
-              if [ -z "$VM_IP" ] || [ "$VM_IP" == "null" ]; then
-                echo "Error: Could not retrieve VM IP address from status or configs file"
-                echo "Status file content:"
-                cat /tmp/vm_status.json
-                echo "Configs file content (partial):"
-                jq '.vm_configs' /tmp/vm_configs.json
-                exit 1
-              fi
-            fi
+          echo "Testing SSH connectivity to the VM..."
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@$VM_IP "echo SSH connection successful"
+          SSH_RESULT=$?
+          if [ $SSH_RESULT -eq 0 ]; then
+            echo "SSH connection successful"
+            echo "ssh_success=true" >> $GITHUB_ENV
+          else
+            echo "SSH connection failed with exit code $SSH_RESULT"
+            echo "Trying with verbose logging:"
+            ssh -i ~/.ssh/id_ed25519 -o "StrictHostKeyChecking=no" -v ubuntu@$VM_IP echo "SSH connection test"
+            echo "ssh_success=false" >> $GITHUB_ENV
           fi
 
-          echo "VM IP address: $VM_IP"
+      - name: Configure RKE2 worker node with Ansible
+        if: ${{ steps.init_ansible.outputs.ansible_env_ready == 'true' && inputs.rke2_worker == 'true' && env.ssh_success == 'true' }}
+        env:
+          RKE2_TOKEN: ${{ secrets.RKE2_TOKEN }}
+          RKE2_SERVER_URL: ${{ secrets.RKE2_SERVER_URL }}
+          ANSIBLE_HOST_KEY_CHECKING: "false"
+        run: |
+          echo "🚀 Configuring RKE2 worker node with Ansible..."
 
-          # Install Ansible
-          echo "🔧 Setting up Ansible..."
-          echo "Current user: $(whoami)"
-          echo "Current PATH: $PATH"
-          echo "Home directory: $HOME"
-          echo "Python version: $(python3 --version)"
-          echo "Pip version: $(python3 -m pip --version)"
-          echo "Installing Ansible..."
-          python3 -m pip install --user ansible
-          echo "Updating PATH to include user bin directory..."
-          export PATH=$HOME/.local/bin:$PATH
-          echo "New PATH: $PATH"
-          echo "Verifying Ansible installation..."
-          which ansible
-          ansible --version || echo "Ansible installation failed"
-          echo "✅ Ansible setup complete (or error logged above)"
+          # Create inventory file
+          echo "[all]" > inventory.ini
+          echo "worker ansible_host=$VM_IP ansible_user=ubuntu" >> inventory.ini
 
-          # Create Ansible inventory file
-          cat > /tmp/ansible_inventory.ini << EOF
-          [all]
-          worker ansible_host=$VM_IP ansible_user=ubuntu ansible_ssh_common_args='-o StrictHostKeyChecking=no'
-          EOF
-
-          # Create a simplified playbook that uses our existing role
-          cat > /tmp/add-rke2-worker.yml << EOF
-          ---
-          # Playbook to add RKE2 worker nodes to an existing cluster
-          - name: Add RKE2 worker node
-            hosts: all
-            become: yes
-            gather_facts: yes
-
-            vars:
-              rke2_server_url: "{{ lookup('env', 'RKE2_SERVER_URL') }}"
-              rke2_token: "{{ lookup('env', 'RKE2_TOKEN') }}"
-              rke2_worker_node_labels:
-                - "node.kubernetes.io/worker=true"
-                - "topology.kubernetes.io/zone=default"
-
-            roles:
-              - role: ../../ansible/roles/rke2-worker
-          EOF
-
-          # Check if the role exists
-          if [ ! -d "ansible/roles/rke2-worker" ]; then
-            echo "⚠️ RKE2 worker role not found at ansible/roles/rke2-worker"
-            echo "Creating a basic RKE2 worker role directly in the playbook..."
-
-            # Create a playbook with inline tasks instead of using a role
-            cat > /tmp/add-rke2-worker.yml << EOF
-          ---
-          # Playbook to add RKE2 worker nodes to an existing cluster
-          - name: Add RKE2 worker node
-            hosts: all
-            become: yes
-            gather_facts: yes
-
-            vars:
-              rke2_server_url: "{{ lookup('env', 'RKE2_SERVER_URL') }}"
-              rke2_token: "{{ lookup('env', 'RKE2_TOKEN') }}"
-              rke2_worker_node_labels:
-                - "node.kubernetes.io/worker=true"
-                - "topology.kubernetes.io/zone=default"
-
-            tasks:
-              - name: Update apt cache
-                apt:
-                  update_cache: yes
-                  cache_valid_time: 3600
-
-              - name: Install required packages
-                apt:
-                  name:
-                    - curl
-                    - jq
-                  state: present
-
-              - name: Download RKE2 installation script
-                get_url:
-                  url: https://get.rke2.io
-                  dest: /tmp/rke2-install.sh
-                  mode: '0755'
-
-              - name: Create RKE2 config directory
-                file:
-                  path: /etc/rancher/rke2
-                  state: directory
-                  mode: '0755'
-
-              - name: Configure RKE2 worker
-                copy:
-                  dest: /etc/rancher/rke2/config.yaml
-                  content: |
-                    server: {{ rke2_server_url }}
-                    token: {{ rke2_token }}
-                  mode: '0600'
-
-              - name: Install RKE2 as agent
-                shell: INSTALL_RKE2_TYPE=agent /tmp/rke2-install.sh
-                args:
-                  creates: /usr/local/bin/rke2
-
-              - name: Enable and start RKE2 service
-                service:
-                  name: rke2-agent
-                  enabled: yes
-                  state: started
-
-              - name: Wait for RKE2 agent to be ready
-                wait_for:
-                  path: /var/lib/rancher/rke2/agent/kubelet.kubeconfig
-                  state: present
-                  timeout: 300
-                register: rke2_ready
-                ignore_errors: yes
-
-              - name: Check RKE2 agent status
-                command: systemctl status rke2-agent
-                register: rke2_status
-                changed_when: false
-                ignore_errors: yes
-
-              - name: Show RKE2 agent status
-                debug:
-                  var: rke2_status.stdout_lines
-          EOF
-          fi
-
-          echo "Ansible inventory:"
-          cat /tmp/ansible_inventory.ini
-
-          echo "Ansible playbook:"
-          cat /tmp/add-rke2-worker.yml
-
-          # Run Ansible playbook with retry logic
-          MAX_RETRIES=3
-          RETRY_COUNT=0
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            echo "Running Ansible playbook (attempt $(($RETRY_COUNT + 1))/$MAX_RETRIES)..."
-
-            # Run with increased verbosity for debugging
-            ansible-playbook -i /tmp/ansible_inventory.ini /tmp/add-rke2-worker.yml -vv
-
-            if [ $? -eq 0 ]; then
-              echo "✅ RKE2 worker configuration completed successfully"
-              break
-            else
-              RETRY_COUNT=$(($RETRY_COUNT + 1))
-              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo "Playbook failed, retrying in 30 seconds..."
-                sleep 30
-              else
-                echo "❌ Failed to configure RKE2 worker after $MAX_RETRIES attempts"
-                exit 1
-              fi
-            fi
-          done
+          # Run the playbook
+          echo "Running Ansible playbook..."
+          ansible-playbook -i inventory.ini ansible/add-rke2-worker.yml -e "rke2_token=$RKE2_TOKEN rke2_server_url=$RKE2_SERVER_URL" -v
