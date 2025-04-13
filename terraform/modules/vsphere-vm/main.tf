@@ -75,10 +75,12 @@ resource "vsphere_virtual_machine" "vm" {
   num_cores_per_socket = 1  # Explicitly set to 1 to prevent drift
 
   # Memory - Convert from GB to MB (vSphere expects MB)
-  # For input memory values, assume GB and convert to MB. For template values, keep as is (already in MB)
+  # Input memory values are in GB, need to convert to MB
+  # Template values are already in MB
   memory               = try(
-    each.value.memory * 1024,
-    var.vm_memory_override != null ? var.vm_memory_override * 1024 : data.vsphere_ovf_vm_template.ubuntu_cloud.memory
+    each.value.memory != null ? each.value.memory * 1024 : null,
+    var.vm_memory_override,
+    data.vsphere_ovf_vm_template.ubuntu_cloud.memory
   )
 
   guest_id             = data.vsphere_ovf_vm_template.ubuntu_cloud.guest_id

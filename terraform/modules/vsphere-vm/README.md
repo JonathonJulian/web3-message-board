@@ -110,3 +110,6 @@ output "vm_ips" {
 - The module uses cloud-init for guest OS customization
 - Static IP assignments will work even if Terraform cannot see the VM's IP address
 - For static IPs, DNS records or /etc/hosts entries may need to be manually configured
+- Memory specifications in `vm_configs` are in GB (e.g., `memory = 4` means 4GB)
+- The `vm_memory_override` value is in MB (e.g., `vm_memory_override = 4096` means 4GB)
+- Ubuntu 24.04 (Noble) requires at least 2GB of memory to function properly

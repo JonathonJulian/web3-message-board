@@ -61,7 +61,7 @@ variable "vm_configs" {
   type = map(object({
     name         = string
     cpu          = optional(number)
-    memory       = optional(number)
+    memory       = optional(number) # Memory in GB
     disk_size_gb = optional(number)
     storage_class = optional(string, "SSD")
     network_type = optional(string, "dhcp")
@@ -77,6 +77,14 @@ variable "vm_configs" {
     ])
     error_message = "When network_type is 'static', ip_address must be provided."
   }
+
+  validation {
+    condition = alltrue([
+      for vm in var.vm_configs :
+        vm.memory == null || vm.memory >= 2
+    ])
+    error_message = "Memory must be at least 2GB for Ubuntu 24.04 (Noble)."
+  }
 }
 
 variable "vm_cpu_override" {
@@ -86,7 +94,7 @@ variable "vm_cpu_override" {
 }
 
 variable "vm_memory_override" {
-  description = "Override the memory size in MB from the template (null = use template setting)"
+  description = "Override the memory size in MB from the template (null = use template memory). NOTE: Unlike vm_configs.memory which is in GB, this value is in MB."
   type        = number
   default     = null
 }
