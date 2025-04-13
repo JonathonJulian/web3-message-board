@@ -645,16 +645,14 @@ jobs:
 
           echo "VM IP address: $VM_IP"
 
-          # Install Ansible directly without assuming any particular environment setup
+          # Install Ansible
           echo "🔧 Setting up Ansible..."
-          python3 -m pip install --user ansible
-
-          # Make sure it's in the PATH
-          export PATH=$HOME/.local/bin:$PATH
-
-          # Verify Ansible is available
-          which ansible
+          sudo apt update
+          sudo apt install -y ansible
+          echo "✅ Ansible installed"
           ansible --version
+          echo "Current PATH: $PATH"
+          which ansible
 
           # Create Ansible inventory file
           cat > /tmp/ansible_inventory.ini << EOF
