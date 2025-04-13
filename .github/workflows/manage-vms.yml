@@ -645,11 +645,15 @@ jobs:
 
           echo "VM IP address: $VM_IP"
 
-          # Activate the existing Ansible virtual environment
-          echo "🔧 Activating Ansible virtual environment..."
-          source ~/.ansible_venv/bin/activate
+          # Install Ansible directly without assuming any particular environment setup
+          echo "🔧 Setting up Ansible..."
+          python3 -m pip install --user ansible
+
+          # Make sure it's in the PATH
+          export PATH=$HOME/.local/bin:$PATH
 
           # Verify Ansible is available
+          which ansible
           ansible --version
 
           # Create Ansible inventory file
