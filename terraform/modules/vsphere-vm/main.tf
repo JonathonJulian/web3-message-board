@@ -170,7 +170,8 @@ resource "vsphere_virtual_machine" "vm" {
       firmware,
       pci_device_id,
       disk.0.io_share_count,
-      vapp.0.properties["user-data"]
+      vapp.0.properties["user-data"],
+      vapp.0.properties["public-keys"]
     ]
   }
 }
