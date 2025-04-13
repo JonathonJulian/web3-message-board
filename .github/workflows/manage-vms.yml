@@ -75,6 +75,11 @@ env:
   MINIO_BUCKET: ${{ secrets.MINIO_BUCKET || 'terraform-state' }}
   MINIO_OBJECT_PATH: "vm-configs.json"
 
+  # AWS credentials for Terraform S3 backend (MinIO)
+  AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY || 'minioadmin' }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY || 'minioadmin' }}
+  AWS_EC2_METADATA_DISABLED: true
+
 jobs:
   manage-vms:
     runs-on: self-hosted
@@ -139,6 +144,11 @@ jobs:
       - name: Run VM management script
         id: vm_management
         run: |
+          # Ensure AWS environment variables are set for Terraform
+          export AWS_ACCESS_KEY_ID="${{ env.AWS_ACCESS_KEY_ID }}"
+          export AWS_SECRET_ACCESS_KEY="${{ env.AWS_SECRET_ACCESS_KEY }}"
+          export AWS_EC2_METADATA_DISABLED=true
+
           bash ./scripts/manage_vms.sh \
             --action="${{ steps.params.outputs.ACTION }}" \
             --vm-name="${{ steps.params.outputs.VM_NAME }}" \
