@@ -533,72 +533,167 @@ jobs:
             echo "- **Status:** ❌ Failed to push to MinIO" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Install Ansible and Dependencies
+      # --------------------------------
+      # Extract host IPs and scan for SSH keys from status file
+      # --------------------------------
+      - name: Extract host IPs and scan SSH keys
         if: |
           env.CONFIGS_SAVED == 'true' &&
           steps.params.outputs.action == 'add' &&
           steps.params.outputs.RKE2_WORKER == 'true'
+        id: scan-hosts
         run: |
-          echo "Installing Ansible and dependencies..."
+          echo "🔍 Extracting host IP from status file..."
 
-          # Ensure apt is available and updated
-          sudo apt-get update || echo "Warning: apt-get update failed"
+          # Debug: print the content of the status file
+          echo "Status file content:"
+          cat /tmp/vm_status.json
 
-          # Install requirements all at once
-          sudo apt-get install -y ansible python3-jmespath python3-yaml
+          # The status file has an array of VM objects with 'ip' field
+          VM_IP=$(jq -r '.[0].ip' /tmp/vm_status.json)
+          if [ -z "$VM_IP" ] || [ "$VM_IP" == "null" ]; then
+            # Try alternative format - sometimes it's not an array
+            VM_IP=$(jq -r '.ip' /tmp/vm_status.json)
+            if [ -z "$VM_IP" ] || [ "$VM_IP" == "null" ]; then
+              # Try getting IP from the VM configs file instead
+              VM_NAME="${{ steps.params.outputs.VM_NAME }}"
+              echo "Looking for IP address of $VM_NAME in configs file..."
+              VM_IP=$(jq -r --arg vm "$VM_NAME" '.vm_configs[$vm].ip_address' /tmp/vm_configs.json)
+              if [ -z "$VM_IP" ] || [ "$VM_IP" == "null" ]; then
+                echo "Error: Could not retrieve VM IP address from status or configs file"
+                echo "Status file content:"
+                cat /tmp/vm_status.json
+                echo "Configs file content (partial):"
+                jq '.vm_configs' /tmp/vm_configs.json
+                exit 1
+              fi
+            fi
+          fi
 
-          # Verify installations
-          echo "Ansible version:"
-          ansible --version
+          echo "Found IP: $VM_IP"
 
-          echo "✅ Ansible installation completed"
+          # Create a temporary file to store known_hosts entries
+          KNOWN_HOSTS_FILE="known_hosts_entries.txt"
+          > $KNOWN_HOSTS_FILE
 
-      - name: Configure RKE2 worker node
+          # Scan SSH key for the IP
+          echo "🔑 Scanning SSH key for host..."
+          ssh-keyscan -H "$VM_IP" >> $KNOWN_HOSTS_FILE
+
+          KNOWN_HOSTS=$(cat $KNOWN_HOSTS_FILE)
+          echo "known_hosts<<EOF" >> $GITHUB_OUTPUT
+          echo "$KNOWN_HOSTS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "✅ Scanned SSH keys for $VM_IP"
+
+      # --------------------------------
+      # Setup SSH authentication using action
+      # --------------------------------
+      - name: Install SSH key
         if: |
           env.CONFIGS_SAVED == 'true' &&
           steps.params.outputs.action == 'add' &&
           steps.params.outputs.RKE2_WORKER == 'true'
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          name: id_ed25519
+          known_hosts: ${{ steps.scan-hosts.outputs.known_hosts }}
+          if_key_exists: replace
+
+      # --------------------------------
+      # Run Ansible to configure RKE2 worker node
+      # --------------------------------
+      - name: Configure RKE2 worker node with Ansible
+        if: |
+          env.CONFIGS_SAVED == 'true' &&
+          steps.params.outputs.action == 'add' &&
+          steps.params.outputs.RKE2_WORKER == 'true'
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "false"
+          RKE2_TOKEN: ${{ secrets.RKE2_TOKEN }}
+          RKE2_SERVER_URL: ${{ secrets.RKE2_SERVER_URL }}
         run: |
-          # Get the VM IP address from status file - fix variable interpolation
-          VM_NAME="${{ steps.params.outputs.VM_NAME }}"
-          VM_IP=$(jq -r --arg vm "$VM_NAME" '.[] | select(.key == $vm) | .ip' /tmp/vm_status.json)
+          echo "🚀 Starting RKE2 worker node configuration..."
 
-          if [[ -z "$VM_IP" || "$VM_IP" == "null" ]]; then
-            echo "❌ Could not find IP address for VM $VM_NAME"
-            # Debug output
-            echo "Debug: Current status file contents:"
-            jq . /tmp/vm_status.json
-            exit 1
+          # Debug: print the content of the status file
+          echo "Status file content:"
+          cat /tmp/vm_status.json
+
+          # Get the VM IP address from the status file
+          # The status file has an array of VM objects with 'ip' field
+          VM_IP=$(jq -r '.[0].ip' /tmp/vm_status.json)
+          if [ -z "$VM_IP" ] || [ "$VM_IP" == "null" ]; then
+            # Try alternative format - sometimes it's not an array
+            VM_IP=$(jq -r '.ip' /tmp/vm_status.json)
+            if [ -z "$VM_IP" ] || [ "$VM_IP" == "null" ]; then
+              # Try getting IP from the VM configs file instead
+              VM_NAME="${{ steps.params.outputs.VM_NAME }}"
+              echo "Looking for IP address of $VM_NAME in configs file..."
+              VM_IP=$(jq -r --arg vm "$VM_NAME" '.vm_configs[$vm].ip_address' /tmp/vm_configs.json)
+              if [ -z "$VM_IP" ] || [ "$VM_IP" == "null" ]; then
+                echo "Error: Could not retrieve VM IP address from status or configs file"
+                echo "Status file content:"
+                cat /tmp/vm_status.json
+                echo "Configs file content (partial):"
+                jq '.vm_configs' /tmp/vm_configs.json
+                exit 1
+              fi
+            fi
           fi
 
-          echo "Configuring RKE2 worker node at $VM_IP..."
+          echo "VM IP address: $VM_IP"
 
-          # Ensure correct gateway is configured on the VM
-          ssh ubuntu@$VM_IP "sudo sed -i 's/via: 192.168.1.1/via: 192.168.1.254/' /etc/netplan/60-static-ip.yaml && sudo netplan apply" || {
-            echo "⚠️ Warning: Could not update gateway configuration. Internet connectivity might be limited."
-          }
-
-          # Verify GitHub connectivity
-          if ! ssh ubuntu@$VM_IP "curl -s -o /dev/null -w '%{http_code}' https://github.com"; then
-            echo "⚠️ Warning: VM cannot reach GitHub. Installation might fail."
-          else
-            echo "✅ VM has connectivity to GitHub."
-          fi
-
-          # Generate Ansible inventory file
+          # Create Ansible inventory file
           cat > /tmp/ansible_inventory.ini << EOF
-          [rke2_workers]
-          $VM_NAME ansible_host=$VM_IP ansible_user=ubuntu ansible_ssh_common_args='-o StrictHostKeyChecking=no'
-
-          [all:vars]
-          ansible_python_interpreter=/usr/bin/python3
+          [all]
+          worker ansible_host=$VM_IP ansible_user=ubuntu ansible_ssh_common_args='-o StrictHostKeyChecking=no'
           EOF
 
-          echo "Inventory file created:"
-          cat /tmp/ansible_inventory.ini
+          # Create a simplified playbook that uses our existing role
+          cat > /tmp/add-rke2-worker.yml << EOF
+          ---
+          # Playbook to add RKE2 worker nodes to an existing cluster
+          - name: Add RKE2 worker node
+            hosts: all
+            become: yes
+            gather_facts: yes
 
-          # Run Ansible playbook with RKE2 token from GitHub secret
-          cd ansible
-          ansible-playbook -i /tmp/ansible_inventory.ini add-rke2-worker.yml -e "rke2_token=${{ secrets.RKE2_TOKEN }}" -e "rke2_server_url=${{ secrets.RKE2_SERVER_URL }}" -v
+            vars:
+              rke2_server_url: "{{ lookup('env', 'RKE2_SERVER_URL') }}"
+              rke2_token: "{{ lookup('env', 'RKE2_TOKEN') }}"
+              rke2_worker_node_labels:
+                - "node.kubernetes.io/worker=true"
+                - "topology.kubernetes.io/zone=default"
 
-          echo "✅ RKE2 worker node configuration completed"
+            roles:
+              - role: ../../ansible/roles/rke2-worker
+          EOF
+
+          # Ensure roles directory exists
+          mkdir -p ~/.ansible/roles
+
+          # Run Ansible playbook with retry logic
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Running Ansible playbook (attempt $(($RETRY_COUNT + 1))/$MAX_RETRIES)..."
+
+            ansible-playbook -i /tmp/ansible_inventory.ini /tmp/add-rke2-worker.yml -v
+
+            if [ $? -eq 0 ]; then
+              echo "✅ RKE2 worker configuration completed successfully"
+              break
+            else
+              RETRY_COUNT=$(($RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Playbook failed, retrying in 30 seconds..."
+                sleep 30
+              else
+                echo "❌ Failed to configure RKE2 worker after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          done
