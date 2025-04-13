@@ -679,8 +679,31 @@ jobs:
 
           echo "VM IP address: $VM_IP"
 
-          # Make sure ansible-playbook is in PATH
-          export PATH="$HOME/.local/bin:$PATH"
+          # Activate the existing Ansible virtual environment
+          if [ -f ~/activate_ansible.sh ]; then
+            echo "🔧 Activating Ansible virtual environment..."
+            source ~/activate_ansible.sh
+          else
+            echo "⚠️ Ansible activation script not found, installing Ansible..."
+            # Install Python and Ansible if needed
+            if command -v apt-get &>/dev/null; then
+              # Ubuntu/Debian
+              sudo apt-get update
+              sudo apt-get install -y python3 python3-pip
+              sudo pip3 install ansible
+            elif command -v brew &>/dev/null; then
+              # macOS
+              brew install ansible
+            else
+              # Try pip directly as a fallback
+              pip3 install --user ansible
+              # Add user bin to PATH
+              export PATH="$HOME/.local/bin:$PATH"
+            fi
+          fi
+
+          # Verify Ansible is available
+          ansible --version
 
           # Create Ansible inventory file
           cat > /tmp/ansible_inventory.ini << EOF
@@ -806,20 +829,8 @@ jobs:
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             echo "Running Ansible playbook (attempt $(($RETRY_COUNT + 1))/$MAX_RETRIES)..."
 
-            # Check if ansible-playbook is available
-            if ! command -v ansible-playbook &>/dev/null; then
-              echo "⚠️ ansible-playbook command not found in PATH"
-              echo "Current PATH: $PATH"
-              echo "Trying to locate ansible-playbook:"
-              find / -name ansible-playbook 2>/dev/null || echo "Not found"
-
-              # Try to install again as a last resort
-              pip3 install --user ansible
-              export PATH="$HOME/.local/bin:$PATH"
-            fi
-
             # Run with increased verbosity for debugging
-            ansible-playbook -i /tmp/ansible_inventory.ini /tmp/add-rke2-worker.yml -vvv
+            ansible-playbook -i /tmp/ansible_inventory.ini /tmp/add-rke2-worker.yml -vv
 
             if [ $? -eq 0 ]; then
               echo "✅ RKE2 worker configuration completed successfully"
