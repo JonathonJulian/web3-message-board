@@ -117,15 +117,17 @@ jobs:
 
           # If SSH_KEY is not empty, use it, otherwise just use the runner key
           if [ -n "$SSH_KEY" ]; then
-            # Combine both keys with a newline for the VM to use both
-            COMBINED_KEY=$(cat <<EOF
-$SSH_KEY
-$RUNNER_KEY
-EOF
-)
-            echo "SSH_PUBLIC_KEY<<EOF" >> $GITHUB_OUTPUT
-            echo "$COMBINED_KEY" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+            # Combine both keys using a safer method for YAML
+            echo "$SSH_KEY" > /tmp/combined_keys.txt
+            echo "$RUNNER_KEY" >> /tmp/combined_keys.txt
+            COMBINED_KEY=$(cat /tmp/combined_keys.txt)
+
+            # Use a YAML-safe way to output multiline content
+            {
+              echo "SSH_PUBLIC_KEY<<EOF"
+              echo "$COMBINED_KEY"
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
           else
             echo "SSH_PUBLIC_KEY=$RUNNER_KEY" >> $GITHUB_OUTPUT
           fi
@@ -609,7 +611,7 @@ EOF
       # --------------------------------
       - name: Initialize Ansible environment
         id: init_ansible
-        if: ${{ inputs.rke2_worker == 'true' }}
+        if: ${{ steps.params.outputs.RKE2_WORKER == 'true' }}
         run: |
           # Debug environment information
           echo "Current user: $(whoami)"
@@ -623,7 +625,7 @@ EOF
           echo "ansible_env_ready=true" >> $GITHUB_OUTPUT
 
       - name: Test SSH Connectivity from Runner
-        if: ${{ inputs.rke2_worker == 'true' }}
+        if: ${{ steps.params.outputs.RKE2_WORKER == 'true' }}
         env:
           RKE2_TOKEN: ${{ secrets.RKE2_TOKEN }}
           RKE2_SERVER_URL: ${{ secrets.RKE2_SERVER_URL }}
@@ -664,7 +666,7 @@ EOF
           done
 
       - name: Configure RKE2 worker node with Ansible
-        if: ${{ steps.init_ansible.outputs.ansible_env_ready == 'true' && inputs.rke2_worker == 'true' && env.ssh_success == 'true' }}
+        if: ${{ steps.init_ansible.outputs.ansible_env_ready == 'true' && steps.params.outputs.RKE2_WORKER == 'true' && env.ssh_success == 'true' }}
         env:
           RKE2_TOKEN: ${{ secrets.RKE2_TOKEN }}
           RKE2_SERVER_URL: ${{ secrets.RKE2_SERVER_URL }}
