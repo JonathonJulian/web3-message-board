@@ -4,61 +4,65 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'Action to perform'
+        description: "Action to perform"
         required: true
+        default: "add"
         type: choice
         options:
           - add
           - remove
-          - list
-          - apply
-        default: 'list'
+          - update
       vm_name:
-        description: 'VM name (identifier in configuration)'
-        required: false
+        description: "VM name (required for any operation)"
+        required: true
         type: string
       network_type:
-        description: 'Network type'
-        required: false
+        description: "Network configuration type"
+        required: true
+        default: "static"
         type: choice
         options:
           - static
           - dhcp
-        default: 'static'
       ip_address:
-        description: 'IP address (required for static IP)'
+        description: "Static IP address (required if network_type is static)"
         required: false
         type: string
       subnet_mask:
-        description: 'Subnet mask (CIDR notation, e.g. "24")'
+        description: "Subnet mask prefix length (e.g. 24 for /24)"
         required: false
+        default: "24"
         type: string
-        default: '24'
       ssh_public_key:
-        description: 'SSH public key for the ubuntu user'
+        description: "SSH public key for VM access"
         required: false
         type: string
+      disk_size_gb:
+        description: "VM disk size in GB"
+        required: false
+        default: 20
+        type: number
+      storage_class:
+        description: "Storage class for VM disks"
+        required: false
+        default: "SSD"
+        type: choice
+        options:
+          - SSD
+          - NVME
+          - SATA
+      cpu:
+        description: "Number of CPU cores"
+        required: false
+        default: 2
+        type: number
+      memory:
+        description: "Memory in GB"
+        required: false
+        default: 4
+        type: number
 
 env:
-  # Determine if we're in test mode based on branch (anything other than main/master)
-  IS_TEST_MODE: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
-
-  # For production (main branch), use the inputs
-  PROD_ACTION: ${{ github.event.inputs.action }}
-  PROD_VM_NAME: ${{ github.event.inputs.vm_name }}
-  PROD_NETWORK_TYPE: ${{ github.event.inputs.network_type }}
-  PROD_IP_ADDRESS: ${{ github.event.inputs.ip_address }}
-  PROD_SUBNET_MASK: ${{ github.event.inputs.subnet_mask }}
-  PROD_SSH_PUBLIC_KEY: ${{ github.event.inputs.ssh_public_key }}
-
-  # For testing (non-main branches), use repository variables or defaults
-  TEST_ACTION: ${{ vars.TEST_ACTION || 'remove' }}
-  TEST_VM_NAME: ${{ vars.TEST_VM_NAME || 'webserver' }}
-  TEST_NETWORK_TYPE: ${{ vars.TEST_NETWORK_TYPE || 'static' }}
-  TEST_IP_ADDRESS: ${{ vars.TEST_IP_ADDRESS || '192.168.1.204' }}
-  TEST_SUBNET_MASK: ${{ vars.TEST_SUBNET_MASK || '24' }}
-  TEST_SSH_PUBLIC_KEY: ${{ vars.TEST_SSH_PUBLIC_KEY || 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO3sOFB9wGEcOgNO5BfxF35Sh+EAOxWTZjx//DK4XHAx jon@blocknative.com' }}
-
   # vSphere credentials from secrets
   VSPHERE_SERVER: ${{ secrets.VSPHERE_SERVER }}
   VSPHERE_USER: ${{ secrets.VSPHERE_USER }}
@@ -69,7 +73,7 @@ env:
   MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY || 'minioadmin' }}
   MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY || 'minioadmin' }}
   MINIO_BUCKET: ${{ secrets.MINIO_BUCKET || 'terraform-state' }}
-  MINIO_OBJECT_PATH: "vm-configs.json"  # Changed from subfolder to file directly
+  MINIO_OBJECT_PATH: "vm-configs.json"
 
 jobs:
   manage-vms:
@@ -79,38 +83,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Install dependencies
-        run: |
-          # Skip system-level package installation
-          echo "Skipping apt-get update since we can't use sudo"
-          echo "Assuming required dependencies are already installed on the runner"
-
       - name: Verify Terraform is installed
         run: |
           terraform --version
           echo "Using existing Terraform installation on the runner"
 
-      - name: Set parameters based on mode
+      - name: Set parameters
         id: params
         run: |
-          # Determine which set of parameters to use based on test mode
-          if [[ "${{ env.IS_TEST_MODE }}" == "true" ]]; then
-            echo "Using TEST mode parameters from repository variables"
-            echo "action=${{ env.TEST_ACTION }}" >> $GITHUB_OUTPUT
-            echo "vm_name=${{ env.TEST_VM_NAME }}" >> $GITHUB_OUTPUT
-            echo "network_type=${{ env.TEST_NETWORK_TYPE }}" >> $GITHUB_OUTPUT
-            echo "ip_address=${{ env.TEST_IP_ADDRESS }}" >> $GITHUB_OUTPUT
-            echo "subnet_mask=${{ env.TEST_SUBNET_MASK }}" >> $GITHUB_OUTPUT
-            echo "ssh_public_key=${{ env.TEST_SSH_PUBLIC_KEY }}" >> $GITHUB_OUTPUT
-          else
-            echo "Using PRODUCTION mode parameters from workflow inputs"
-            echo "action=${{ env.PROD_ACTION }}" >> $GITHUB_OUTPUT
-            echo "vm_name=${{ env.PROD_VM_NAME }}" >> $GITHUB_OUTPUT
-            echo "network_type=${{ env.PROD_NETWORK_TYPE }}" >> $GITHUB_OUTPUT
-            echo "ip_address=${{ env.PROD_IP_ADDRESS }}" >> $GITHUB_OUTPUT
-            echo "subnet_mask=${{ env.PROD_SUBNET_MASK }}" >> $GITHUB_OUTPUT
-            echo "ssh_public_key=${{ env.PROD_SSH_PUBLIC_KEY }}" >> $GITHUB_OUTPUT
-          fi
+          echo "ACTION=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
+          echo "VM_NAME=${{ github.event.inputs.vm_name }}" >> $GITHUB_OUTPUT
+          echo "NETWORK_TYPE=${{ github.event.inputs.network_type }}" >> $GITHUB_OUTPUT
+          echo "IP_ADDRESS=${{ github.event.inputs.ip_address }}" >> $GITHUB_OUTPUT
+          echo "SUBNET_MASK=${{ github.event.inputs.subnet_mask }}" >> $GITHUB_OUTPUT
+          echo "SSH_PUBLIC_KEY=${{ github.event.inputs.ssh_public_key }}" >> $GITHUB_OUTPUT
+          echo "DISK_SIZE_GB=${{ github.event.inputs.disk_size_gb }}" >> $GITHUB_OUTPUT
+          echo "STORAGE_CLASS=${{ github.event.inputs.storage_class }}" >> $GITHUB_OUTPUT
+          echo "CPU=${{ github.event.inputs.cpu }}" >> $GITHUB_OUTPUT
+          echo "MEMORY=${{ github.event.inputs.memory }}" >> $GITHUB_OUTPUT
 
       - name: Pull VM configurations from MinIO
         id: pull_configs
@@ -149,105 +139,20 @@ jobs:
       - name: Run VM management script
         id: vm_management
         run: |
-          # Make the script executable
-          chmod +x ./scripts/manage_vms.sh
-
-          # Get parameters from previous step
-          ACTION="${{ steps.params.outputs.action }}"
-          VM_NAME="${{ steps.params.outputs.vm_name }}"
-          NETWORK_TYPE="${{ steps.params.outputs.network_type }}"
-          IP_ADDRESS="${{ steps.params.outputs.ip_address }}"
-          SUBNET_MASK="${{ steps.params.outputs.subnet_mask }}"
-          SSH_PUBLIC_KEY="${{ steps.params.outputs.ssh_public_key }}"
-
-          # Check if IP is already in use and find a free one if needed
-          if [[ "$NETWORK_TYPE" == "static" && "$ACTION" == "add" ]]; then
-            echo "Checking if IP $IP_ADDRESS is available..."
-
-            # Extract the base IP prefix (first 3 octets)
-            IP_PREFIX=$(echo "$IP_ADDRESS" | cut -d. -f1-3)
-            IP_LAST_OCTET=$(echo "$IP_ADDRESS" | cut -d. -f4)
-
-            # Try pinging the IP to check if it's in use
-            ATTEMPTS=0
-            MAX_ATTEMPTS=50  # Don't try more than 50 IPs (octet max is 254)
-            CURRENT_IP="$IP_ADDRESS"
-            CURRENT_OCTET="$IP_LAST_OCTET"
-
-            while ping -c 1 -W 1 "$CURRENT_IP" &>/dev/null && [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
-              echo "IP $CURRENT_IP is already in use. Trying next IP..."
-              ATTEMPTS=$((ATTEMPTS + 1))
-              CURRENT_OCTET=$((CURRENT_OCTET + 1))
-
-              # Ensure we stay in valid IP range (1-254)
-              if [ $CURRENT_OCTET -gt 254 ]; then
-                echo "Warning: Reached end of IP range. Wrapping around to start."
-                CURRENT_OCTET=1
-              fi
-
-              CURRENT_IP="${IP_PREFIX}.${CURRENT_OCTET}"
-            done
-
-            if [ $ATTEMPTS -ge $MAX_ATTEMPTS ]; then
-              echo "Error: Could not find an available IP after $MAX_ATTEMPTS attempts."
-              exit 1
-            fi
-
-            if [ "$CURRENT_IP" != "$IP_ADDRESS" ]; then
-              echo "Original IP $IP_ADDRESS was in use. Using $CURRENT_IP instead."
-              IP_ADDRESS="$CURRENT_IP"
-            else
-              echo "IP $IP_ADDRESS is available. Proceeding with deployment."
-            fi
-          fi
-
-          # Set vSphere credentials as Terraform environment variables
-          export TF_VAR_vsphere_user="${{ secrets.VSPHERE_USER }}"
-          export TF_VAR_vsphere_password="${{ secrets.VSPHERE_PASSWORD }}"
-          export TF_VAR_vsphere_server="${{ secrets.VSPHERE_SERVER }}"
-          export TF_VAR_ssh_public_key="$SSH_PUBLIC_KEY"
-
-          # Set govc environment variables for vSphere API access
-          export GOVC_URL="https://${{ secrets.VSPHERE_SERVER }}"
-          export GOVC_USERNAME="${{ secrets.VSPHERE_USER }}"
-          export GOVC_PASSWORD="${{ secrets.VSPHERE_PASSWORD }}"
-          export GOVC_INSECURE=true  # Skip certificate verification for lab environments
-          
-          # Set MinIO S3 credentials for Terraform backend (explicitly naming both AWS and original variables)
-          export AWS_ACCESS_KEY_ID="${{ secrets.MINIO_ACCESS_KEY || env.MINIO_ACCESS_KEY }}"
-          export AWS_SECRET_ACCESS_KEY="${{ secrets.MINIO_SECRET_KEY || env.MINIO_SECRET_KEY }}"
-          # MinIO-specific environment variables as backup
-          export MINIO_ACCESS_KEY="${{ secrets.MINIO_ACCESS_KEY || env.MINIO_ACCESS_KEY }}"
-          export MINIO_SECRET_KEY="${{ secrets.MINIO_SECRET_KEY || env.MINIO_SECRET_KEY }}"
-
-          # Set other required AWS variables to prevent credential lookup
-          export AWS_REGION="us-east-1"
-          export AWS_DEFAULT_REGION="us-east-1"
-          export AWS_EC2_METADATA_DISABLED="true"  # Prevent EC2 metadata lookup
-
-          echo "Running with: ACTION=$ACTION, VM_NAME=$VM_NAME, NETWORK_TYPE=$NETWORK_TYPE"
-          if [[ "$NETWORK_TYPE" == "static" ]]; then
-            echo "Static IP: $IP_ADDRESS/$SUBNET_MASK"
-          fi
-          echo "Using SSH public key: $SSH_PUBLIC_KEY"
-
-          # First initialize Terraform with upgrade to handle provider version changes
-          echo "Initializing Terraform with provider upgrades..."
-          cd terraform/environments/dev
-          terraform init -upgrade
-
-          # Run manage_vms.sh script with parameters
-          cd ../../../
           bash ./scripts/manage_vms.sh \
-            --action="$ACTION" \
-            --vm-name="$VM_NAME" \
-            --network-type="$NETWORK_TYPE" \
-            --ip-address="$IP_ADDRESS" \
-            --subnet-mask="$SUBNET_MASK" \
-            --ssh-public-key="$SSH_PUBLIC_KEY"
+            --action="${{ steps.params.outputs.ACTION }}" \
+            --vm-name="${{ steps.params.outputs.VM_NAME }}" \
+            --network-type="${{ steps.params.outputs.NETWORK_TYPE }}" \
+            --ip-address="${{ steps.params.outputs.IP_ADDRESS }}" \
+            --subnet-mask="${{ steps.params.outputs.SUBNET_MASK }}" \
+            --ssh-public-key="${{ steps.params.outputs.SSH_PUBLIC_KEY }}" \
+            --disk-size-gb="${{ steps.params.outputs.DISK_SIZE_GB }}" \
+            --storage-class="${{ steps.params.outputs.STORAGE_CLASS }}" \
+            --cpu="${{ steps.params.outputs.CPU }}" \
+            --memory="${{ steps.params.outputs.MEMORY }}"
 
           # If we're adding a VM, make sure we also update all other VMs to have SSH keys for consistency
-          if [[ "$ACTION" == "add" || "$ACTION" == "apply" ]] && [[ -n "$SSH_PUBLIC_KEY" ]]; then
+          if [[ "${{ steps.params.outputs.ACTION }}" == "add" || "${{ steps.params.outputs.ACTION }}" == "apply" ]] && [[ -n "${{ steps.params.outputs.SSH_PUBLIC_KEY }}" ]]; then
             echo "Ensuring all VMs have SSH public keys set..."
             # Extract all VM names
             VM_NAMES=$(jq -r '.vm_configs | keys[]' ./terraform/environments/dev/terraform.tfvars.json)
@@ -259,13 +164,13 @@ jobs:
                 bash ./scripts/manage_vms.sh \
                   --action="add" \
                   --vm-name="$VM" \
-                  --ssh-public-key="$SSH_PUBLIC_KEY"
+                  --ssh-public-key="${{ steps.params.outputs.SSH_PUBLIC_KEY }}"
               fi
             done
           fi
 
           # Always run apply after add/remove operations to apply the changes
-          if [[ "$ACTION" == "add" || "$ACTION" == "remove" ]]; then
+          if [[ "${{ steps.params.outputs.ACTION }}" == "add" || "${{ steps.params.outputs.ACTION }}" == "remove" ]]; then
             echo "Running apply operation to apply configuration changes..."
             bash ./scripts/manage_vms.sh --action=apply
           fi
@@ -433,8 +338,11 @@ jobs:
           IP_ADDRESS="${{ steps.params.outputs.ip_address }}"
           SUBNET_MASK="${{ steps.params.outputs.subnet_mask }}"
           SSH_PUBLIC_KEY="${{ steps.params.outputs.ssh_public_key }}"
+          DISK_SIZE_GB="${{ steps.params.outputs.disk_size_gb }}"
+          STORAGE_CLASS="${{ steps.params.outputs.storage_class }}"
+          CPU="${{ steps.params.outputs.cpu }}"
+          MEMORY="${{ steps.params.outputs.memory }}"
 
-          echo "- **Mode:** \`${{ env.IS_TEST_MODE == 'true' && 'TEST' || 'PRODUCTION' }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Action:** \`$ACTION\`" >> $GITHUB_STEP_SUMMARY
 
           if [[ "$ACTION" == "add" ]]; then
