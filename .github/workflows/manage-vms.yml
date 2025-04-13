@@ -199,12 +199,41 @@ jobs:
             --memory="${{ steps.params.outputs.MEMORY }}" \
             --rke2-worker="${{ steps.params.outputs.RKE2_WORKER }}"
 
+                echo "Using IP address: $VM_IP"
+
+                # Get other parameters for this VM for completeness
+                VM_SUBNET=$(jq -r ".vm_configs[\"$VM\"].subnet_mask // \"24\"" ./terraform/environments/dev/terraform.tfvars.json)
+                VM_CPU=$(jq -r ".vm_configs[\"$VM\"].cpu // \"2\"" ./terraform/environments/dev/terraform.tfvars.json)
+                VM_MEMORY=$(jq -r ".vm_configs[\"$VM\"].memory // \"4\"" ./terraform/environments/dev/terraform.tfvars.json)
+                VM_DISK=$(jq -r ".vm_configs[\"$VM\"].disk_size_gb // \"20\"" ./terraform/environments/dev/terraform.tfvars.json)
+
+                # Update the VM with the SSH key, passing all required parameters
+                bash ./scripts/manage_vms.sh \
+                  --action="${{ steps.params.outputs.ACTION }}" \
+                  --vm-name="$VM" \
+                  --network-type="static" \
+                  --ip-address="$VM_IP" \
+                  --subnet-mask="$VM_SUBNET" \
+                  --cpu="$VM_CPU" \
+                  --memory="$VM_MEMORY" \
+                  --disk-size-gb="$VM_DISK" \
+                  --ssh-public-key="${{ steps.params.outputs.SSH_PUBLIC_KEY }}"
+              fi
+            done
+          fi
+
           # If we're adding a VM, make sure we also update all other VMs to have SSH keys for consistency
           if [[ "${{ steps.params.outputs.ACTION }}" == "add" || "${{ steps.params.outputs.ACTION }}" == "apply" ]] && [[ -n "${{ steps.params.outputs.SSH_PUBLIC_KEY }}" ]]; then
             echo "Ensuring all VMs have SSH public keys set..."
             # Extract all VM names
             VM_NAMES=$(jq -r '.vm_configs | keys[]' ./terraform/environments/dev/terraform.tfvars.json)
             for VM in $VM_NAMES; do
+              # Skip the VM we just added - it already has the SSH key
+              if [[ "$VM" == "${{ steps.params.outputs.VM_NAME }}" ]]; then
+                echo "Skipping newly added VM '$VM' as it already has the SSH key"
+                continue
+              fi
+
               # Check if this VM already has an SSH key
               HAS_KEY=$(jq -r ".vm_configs[\"$VM\"].ssh_public_key // \"\"" ./terraform/environments/dev/terraform.tfvars.json)
               if [[ -z "$HAS_KEY" ]]; then
@@ -227,9 +256,9 @@ jobs:
                 VM_MEMORY=$(jq -r ".vm_configs[\"$VM\"].memory // \"4\"" ./terraform/environments/dev/terraform.tfvars.json)
                 VM_DISK=$(jq -r ".vm_configs[\"$VM\"].disk_size_gb // \"20\"" ./terraform/environments/dev/terraform.tfvars.json)
 
-                # Update the VM with the SSH key, passing all required parameters
+                # Use the original action from the input, not hardcoded "update"
                 bash ./scripts/manage_vms.sh \
-                  --action="update" \
+                  --action="${{ steps.params.outputs.ACTION }}" \
                   --vm-name="$VM" \
                   --network-type="static" \
                   --ip-address="$VM_IP" \
@@ -243,6 +272,7 @@ jobs:
           fi
 
           # Always run apply after add/remove operations to apply the changes
+          # This is the only action that should be hardcoded
           if [[ "${{ steps.params.outputs.ACTION }}" == "add" || "${{ steps.params.outputs.ACTION }}" == "remove" ]]; then
             echo "Running apply operation to apply configuration changes..."
             bash ./scripts/manage_vms.sh --action=apply
