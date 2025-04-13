@@ -101,7 +101,7 @@ resource "vsphere_virtual_machine" "vm" {
 
   # Disk configuration
   dynamic "disk" {
-    for_each = [1]  # Always create a disk block
+    for_each = (try(each.value.disk_size_gb, null) != null || var.default_disk_size_gb != null) ? [1] : []
     content {
       label            = "disk0"
       # Use a minimum of 20GB as the base size (Ubuntu Cloud image is typically smaller than this)
