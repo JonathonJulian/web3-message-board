@@ -97,36 +97,38 @@ jobs:
         run: |
           echo "ACTION=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
           echo "VM_NAME=${{ github.event.inputs.vm_name }}" >> $GITHUB_OUTPUT
-          echo "NETWORK_TYPE=static" >> $GITHUB_OUTPUT
           echo "IP_ADDRESS=${{ github.event.inputs.ip_address }}" >> $GITHUB_OUTPUT
-          echo "SUBNET_MASK=${{ github.event.inputs.subnet_mask }}" >> $GITHUB_OUTPUT
-          echo "SSH_PUBLIC_KEY=${{ github.event.inputs.ssh_public_key }}" >> $GITHUB_OUTPUT
-          echo "DISK_SIZE_GB=${{ github.event.inputs.disk_size_gb }}" >> $GITHUB_OUTPUT
-          echo "STORAGE_CLASS=${{ github.event.inputs.storage_class }}" >> $GITHUB_OUTPUT
-          echo "RKE2_WORKER=${{ github.event.inputs.rke2_worker }}" >> $GITHUB_OUTPUT
+          echo "SUBNET_MASK=${{ github.event.inputs.subnet_mask || '24' }}" >> $GITHUB_OUTPUT
+          echo "CPU=${{ github.event.inputs.cpu || '2' }}" >> $GITHUB_OUTPUT
+          echo "MEMORY=${{ github.event.inputs.memory || '4' }}" >> $GITHUB_OUTPUT
+          echo "DISK_SIZE_GB=${{ github.event.inputs.disk_size_gb || '20' }}" >> $GITHUB_OUTPUT
+          echo "RKE2_WORKER=${{ github.event.inputs.rke2_worker || 'false' }}" >> $GITHUB_OUTPUT
 
-          # Ensure CPU is at least 2 cores
-          CPU="${{ github.event.inputs.cpu }}"
-          if [[ -z "$CPU" || "$CPU" -lt 2 ]]; then
-            CPU=2
-            echo "Setting CPU to minimum required value: 2"
-          fi
-          echo "CPU=$CPU" >> $GITHUB_OUTPUT
+          # Get user-provided SSH key or use default if not specified
+          SSH_KEY="${{ github.event.inputs.ssh_public_key }}"
 
-          # Ensure memory is at least 2GB for Ubuntu 24.04 (Noble)
-          MEMORY="${{ github.event.inputs.memory }}"
-          if [[ -z "$MEMORY" || "$MEMORY" -lt 2 ]]; then
-            MEMORY=2
-            echo "Setting memory to minimum required value: 2GB"
+          # If user didn't provide an SSH key, use an empty string
+          if [ -z "$SSH_KEY" ]; then
+            SSH_KEY=""
           fi
 
-          # For RKE2 worker nodes, ensure at least 4GB memory
-          if [[ "${{ github.event.inputs.rke2_worker }}" == "true" && "$MEMORY" -lt 4 ]]; then
-            MEMORY=4
-            echo "Setting memory to minimum required value for RKE2: 4GB"
-          fi
+          # The runner's SSH key that should always be added
+          RUNNER_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHQTZgYpm0K6DX25sgOpE1fE4jS9iPwedZudRXZEEQc4 runner@vm"
 
-          echo "MEMORY=$MEMORY" >> $GITHUB_OUTPUT
+          # If SSH_KEY is not empty, use it, otherwise just use the runner key
+          if [ -n "$SSH_KEY" ]; then
+            # Combine both keys with a newline for the VM to use both
+            COMBINED_KEY=$(cat <<EOF
+$SSH_KEY
+$RUNNER_KEY
+EOF
+)
+            echo "SSH_PUBLIC_KEY<<EOF" >> $GITHUB_OUTPUT
+            echo "$COMBINED_KEY" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "SSH_PUBLIC_KEY=$RUNNER_KEY" >> $GITHUB_OUTPUT
+          fi
 
       - name: Pull VM configurations from MinIO
         id: pull_configs
@@ -626,18 +628,40 @@ jobs:
           RKE2_TOKEN: ${{ secrets.RKE2_TOKEN }}
           RKE2_SERVER_URL: ${{ secrets.RKE2_SERVER_URL }}
         run: |
-          echo "Testing SSH connectivity to the VM..."
-          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@$VM_IP "echo SSH connection successful"
-          SSH_RESULT=$?
-          if [ $SSH_RESULT -eq 0 ]; then
-            echo "SSH connection successful"
-            echo "ssh_success=true" >> $GITHUB_ENV
-          else
-            echo "SSH connection failed with exit code $SSH_RESULT"
-            echo "Trying with verbose logging:"
-            ssh -i ~/.ssh/id_ed25519 -o "StrictHostKeyChecking=no" -v ubuntu@$VM_IP echo "SSH connection test"
-            echo "ssh_success=false" >> $GITHUB_ENV
-          fi
+          echo "Testing SSH connectivity to the VM with IP $VM_IP..."
+          echo "Using runner's SSH key:"
+          cat ~/.ssh/id_ed25519.pub
+
+          # Wait for VM to fully boot and SSH to be available
+          MAX_RETRIES=20
+          RETRY_COUNT=0
+          echo "Will try connecting to $VM_IP for up to $(( MAX_RETRIES * 30 )) seconds..."
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "Attempt $RETRY_COUNT of $MAX_RETRIES..."
+
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@$VM_IP "echo SSH connection successful"; then
+              echo "SSH connection successful"
+              echo "ssh_success=true" >> $GITHUB_ENV
+              break
+            else
+              echo "SSH connection failed. Waiting 30 seconds before retry..."
+              sleep 30
+
+              # On every 5th retry, try with verbose logging
+              if [ $(( RETRY_COUNT % 5 )) -eq 0 ]; then
+                echo "Trying with verbose logging on attempt $RETRY_COUNT:"
+                ssh -i ~/.ssh/id_ed25519 -o "StrictHostKeyChecking=no" -v ubuntu@$VM_IP echo "SSH connection test"
+              fi
+
+              # On the last retry, set failure
+              if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                echo "Failed after $MAX_RETRIES attempts."
+                echo "ssh_success=false" >> $GITHUB_ENV
+              fi
+            fi
+          done
 
       - name: Configure RKE2 worker node with Ansible
         if: ${{ steps.init_ansible.outputs.ansible_env_ready == 'true' && inputs.rke2_worker == 'true' && env.ssh_success == 'true' }}
