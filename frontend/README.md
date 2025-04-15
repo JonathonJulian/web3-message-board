@@ -75,6 +75,7 @@ The frontend is deployed using Ansible as part of the Nginx configuration:
 make ansible-static_site
 ```
 
+
 This will:
 1. Build the frontend application
 2. Copy the built files to the Nginx web root
