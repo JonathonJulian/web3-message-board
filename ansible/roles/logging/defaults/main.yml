@@ -2,7 +2,7 @@
 # Defaults for the logging role
 
 # Agent selection
-logging_agent: alloy  # Options: "promtail" or "alloy"
+logging_agent: alloy  # Options: "promtail" or "alloy" (will be overridden by group membership)
 
 # Shared variables
 loki_url: "http://grafana.local/loki-push"
@@ -15,6 +15,10 @@ logs:
     path: "/var/log/syslog"
     job: system
     type: syslog
+  - name: nginx
+    path: "/var/log/nginx/access.log"
+    job: webserver
+    type: nginx
 
 # Promtail variables
 promtail_version: "2.8.4"
@@ -37,6 +41,7 @@ migrate_generate_report: true
 # Define log groups here if using multiple file matches
 log_groups:
   - system
+  - webserver
 
 # Example of additional log paths (can be overridden in host/group vars)
 # additional_log_paths:

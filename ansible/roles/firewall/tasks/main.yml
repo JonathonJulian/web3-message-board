@@ -9,10 +9,50 @@
     cache_valid_time: 3600
   when: firewall_enabled
 
+# Check current UFW status and rules
+- name: Check if UFW is installed and enabled
+  ansible.builtin.command: ufw status verbose
+  register: ufw_status
+  changed_when: false
+  failed_when: false
+  when: firewall_enabled
+
+- name: Set firewall state facts
+  ansible.builtin.set_fact:
+    ufw_is_active: "{{ 'Status: active' in ufw_status.stdout }}"
+    default_policy_correct: "{{ firewall_default_policy + ' (incoming)' in ufw_status.stdout and 'allow (outgoing)' in ufw_status.stdout }}"
+    logging_correct: "{{ not firewall_enable_logging or 'Logging: on' in ufw_status.stdout }}"
+  when: firewall_enabled
+
+# Simple approach to check for missing rules
+- name: Collect missing rules
+  ansible.builtin.set_fact:
+    missing_rules: "{{ missing_rules | default([]) + [item] }}"
+  when: >
+    firewall_enabled and ufw_is_active and
+    (item.port | string + '/' + item.proto | string | lower + ' ') not in ufw_status.stdout
+  with_items: "{{ firewall_rules }}"
+
+# Determine if reset needed
+- name: Determine if firewall reset is needed
+  ansible.builtin.set_fact:
+    reset_needed: "{{ not ufw_is_active or not default_policy_correct or not logging_correct }}"
+    final_missing_rules: "{{ missing_rules | default([]) }}"
+  when: firewall_enabled
+
+- name: Show configuration status
+  ansible.builtin.debug:
+    msg: |
+      Reset needed: {{ reset_needed | default(false) }}
+      Missing rules: {{ final_missing_rules | default([]) | length }}
+      {{ final_missing_rules | default([]) | to_nice_yaml if final_missing_rules is defined and final_missing_rules | length > 0 else '' }}
+  when: firewall_enabled
+
+# Only reset when needed
 - name: Reset UFW to default state
   community.general.ufw:
     state: reset
-  when: firewall_enabled
+  when: firewall_enabled and reset_needed
 
 - name: Set default UFW policy
   community.general.ufw:
@@ -21,25 +61,35 @@
   loop:
     - {direction: 'incoming', policy: "{{firewall_default_policy}}"}
     - {direction: 'outgoing', policy: 'allow'}
-  when: firewall_enabled
+  when: firewall_enabled and reset_needed
 
-- name: Configure firewall rules
+# Configure all rules after reset
+- name: Configure all firewall rules after reset
   community.general.ufw:
     rule: allow
     port: '{{item.port}}'
     proto: "{{item.proto}}"
-  loop: "{{firewall_rules}}"
-  when: firewall_enabled
+  loop: "{{ firewall_rules }}"
+  when: firewall_enabled and reset_needed
+
+# Only add missing rules if no reset needed
+- name: Add missing firewall rules
+  community.general.ufw:
+    rule: allow
+    port: '{{item.port}}'
+    proto: "{{item.proto}}"
+  loop: "{{ final_missing_rules }}"
+  when: firewall_enabled and not reset_needed and final_missing_rules is defined and final_missing_rules | length > 0
 
 - name: Enable UFW logging
   community.general.ufw:
     logging: on
-  when: firewall_enabled and firewall_enable_logging
+  when: firewall_enabled and firewall_enable_logging and (not ufw_is_active or not logging_correct)
 
 - name: Enable UFW
   community.general.ufw:
     state: enabled
-  when: firewall_enabled
+  when: firewall_enabled and not ufw_is_active
 
 - name: Ensure UFW service is enabled at boot
   ansible.builtin.systemd:

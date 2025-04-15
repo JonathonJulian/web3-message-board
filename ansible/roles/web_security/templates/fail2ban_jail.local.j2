@@ -1,4 +1,6 @@
 [DEFAULT]
+# IPv6 support
+allowipv6 = true
 # Ban hosts for 10 minutes by default
 bantime = 600
 # Check for new activity every 60 seconds
@@ -7,6 +9,8 @@ findtime = 600
 maxretry = 5
 # Ban via iptables
 banaction = iptables-multiport
+# Set correct chain
+chain = INPUT
 
 # SSH jail
 [sshd]
@@ -16,7 +20,6 @@ logpath = %(sshd_log)s
 backend = %(sshd_backend)s
 maxretry = 3
 bantime = 3600
-
 # Nginx HTTP AUTH
 [nginx-http-auth]
 enabled = true

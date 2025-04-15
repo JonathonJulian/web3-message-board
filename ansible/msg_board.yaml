@@ -12,6 +12,19 @@
         msg: "Using authentication method: {{auth.method | default('from inventory')}}"
       tags: ['always']
 
+    - name: Set connection method based on auth.method
+      set_fact:
+        ansible_connection: "{{ 'ssh' if auth.method == 'ssh_key' else 'paramiko' }}"
+        ansible_password: "{{ ansible_ssh_pass | default(omit) }}"
+        ansible_user: "{{ auth.user | default(ansible_user) }}"
+      when: auth.method is defined
+      tags: ['always']
+
+    - name: Display current connection details
+      debug:
+        msg: "Connection: {{ ansible_connection }}"
+      tags: ['always']
+
     - name: Update apt cache and apply security updates
       apt:
         update_cache: yes
@@ -29,9 +42,11 @@
 
     # Web server setup
     - {role: nginx, tags: ['nginx', 'webserver']}
-
     # Monitoring and observability
     - {role: logging, tags: ['logging', 'monitoring']}
+
+    # GitHub CLI
+    - {role: github_cli, tags: ['github_cli', 'application']}
 
     # Application components
     - {role: service, tags: ['api', 'application']}

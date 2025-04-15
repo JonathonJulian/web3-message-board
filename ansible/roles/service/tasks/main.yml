@@ -1,7 +1,37 @@
 ---
 # Go service tasks
 
-# Download from GitHub releases using gh CLI
+# Check if binary exists and get current version
+- name: Check if binary exists and get version
+  ansible.builtin.shell: |
+    if [ -f "{{ service_binary_dir }}/{{ service_name }}" ]; then
+      # Try to get version from binary (assuming it supports -v or --version)
+      version=$({{ service_binary_dir }}/{{ service_name }} -v 2>/dev/null || {{ service_binary_dir }}/{{ service_name }} --version 2>/dev/null || echo "unknown")
+      echo "$version"
+
+      # Check if the version file exists
+      if [ -f "{{ service_binary_dir }}/.{{ service_name }}.version" ]; then
+        stored_version=$(cat "{{ service_binary_dir }}/.{{ service_name }}.version")
+        echo "Stored version: $stored_version"
+        # Return success if the stored version matches the target version
+        if [ "$stored_version" = "{{ service_release_version | default(release_version) }}" ]; then
+          exit 0
+        fi
+      fi
+      exit 1
+    else
+      echo "Binary does not exist"
+      exit 1
+    fi
+  register: binary_check
+  changed_when: false
+  failed_when: false
+
+- name: Set binary download fact
+  ansible.builtin.set_fact:
+    binary_needs_download: "{{ binary_check.rc != 0 }}"
+
+# Download from GitHub releases using gh CLI only if needed
 - name: Download binary from GitHub releases
   ansible.builtin.shell: |
     export GH_TOKEN="{{ github_token }}"
@@ -30,14 +60,14 @@
     sudo mv "${binary_pattern}" "{{ service_binary_dir }}/{{ service_name }}"
     sudo chmod 0755 "{{ service_binary_dir }}/{{ service_name }}"
     sudo chown "{{ service_user }}:{{ service_group }}" "{{ service_binary_dir }}/{{ service_name }}"
-  notify: Restart service
+
+    # Store version information in a file for future checks
+    echo "{{ service_release_version | default(release_version) }}" | sudo tee "{{ service_binary_dir }}/.{{ service_name }}.version" > /dev/null
   register: download_result
   until: download_result is succeeded
-
-# Force handler to run immediately when binary is updated
-- name: Force handlers to run after binary update
-  ansible.builtin.meta: flush_handlers
-  when: download_result is changed
+  become: false
+  become_user: ubuntu
+  when: binary_needs_download
 
 # Create log file
 - name: Create log file
@@ -57,10 +87,16 @@
     owner: root
     group: root
     mode: 0644
-  notify: Restart service
+  register: service_template_result
+
+# Ensure systemd reloads configurations
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: yes
+  when: service_template_result is changed
 
 # Check if service exists already
-- name: Check if service already exists
+- name: Check if service exists already
   ansible.builtin.stat:
     path: "/etc/systemd/system/{{ service_name }}.service"
   register: service_file
@@ -71,8 +107,7 @@
     name: "{{ service_name }}"
     state: started
     enabled: yes
-    daemon_reload: yes
-  when: not service_file.stat.exists
+  when: not service_file.stat.exists or service_template_result is changed
   register: service_start_result
 
 # Enable and restart service - for updates
@@ -81,8 +116,7 @@
     name: "{{ service_name }}"
     state: restarted
     enabled: yes
-    daemon_reload: yes
-  when: service_file.stat.exists
+  when: service_file.stat.exists and download_result is changed and service_start_result is skipped
   register: service_restart_result
 
 # Verify binary hash after installation

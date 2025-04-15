@@ -3,10 +3,11 @@
 # Managed by Ansible - {{ ansible_managed }}
 
 [Definition]
+allowipv6 = true
 failregex = ^ \[error\] \d+#\d+: \*\d+ user "\S+":? (password mismatch|was not found in ".*"), client: <HOST>, server: \S+, request: "\S+ \S+ HTTP/\d+\.\d+", host: "\S+"(, referrer: "\S+")?\s*$
             ^ \[error\] \d+#\d+: \*\d+ no user/password was provided for basic authentication, client: <HOST>, server: \S+, request: "\S+ \S+ HTTP/\d+\.\d+", host: "\S+"(, referrer: "\S+")?\s*$
             ^ \[error\] \d+#\d+: \*\d+ user ".*?" was not found in ".*?", client: <HOST>, .*$
-            ^ \[crit\] \d+#\d+: \*\d+ SSL_do_handshake\(\) failed .*$
+            ^ \[crit\] \d+#\d+: \*\d+ SSL_do_handshake\(\) failed .*, client: <HOST>, .*$
 
 ignoreregex =
 

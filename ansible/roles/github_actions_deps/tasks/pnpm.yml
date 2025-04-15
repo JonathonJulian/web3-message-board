@@ -1,10 +1,27 @@
 ---
 # PNPM package manager installation
 
+- name: Check if pnpm is already installed
+  shell: command -v pnpm && pnpm --version || echo "not installed"
+  register: pnpm_version_output
+  changed_when: false
+  ignore_errors: true
+
+- name: Set pnpm facts
+  set_fact:
+    pnpm_current_version: "{{ pnpm_version_output.stdout if 'not installed' not in pnpm_version_output.stdout else 'not installed' }}"
+    pnpm_needs_install: "{{ 'not installed' in pnpm_version_output.stdout }}"
+    pnpm_version: "{{ pnpm_version | default('latest') }}"
+
+- name: Debug pnpm installation status
+  debug:
+    msg: "PNPM status: Current version - {{ pnpm_current_version }}, Needs install - {{ pnpm_needs_install }}"
+
 - name: Download pnpm installer
   shell: curl -fsSL https://get.pnpm.io/install.sh | sh -
   args:
     creates: "{{ ansible_env.HOME }}/.local/share/pnpm/pnpm"
+  when: pnpm_needs_install | bool
 
 - name: Add pnpm to user PATH
   lineinfile:
@@ -12,3 +29,12 @@
     line: 'export PATH=$PATH:{{ ansible_env.HOME }}/.local/share/pnpm'
     state: present
     create: yes
+  when: pnpm_needs_install | bool
+
+- name: Add pnpm to user PATH (zsh)
+  lineinfile:
+    path: "{{ ansible_env.HOME }}/.zshrc"
+    line: 'export PATH=$PATH:{{ ansible_env.HOME }}/.local/share/pnpm'
+    state: present
+    create: yes
+  when: pnpm_needs_install | bool and ansible_env.SHELL is defined and 'zsh' in ansible_env.SHELL

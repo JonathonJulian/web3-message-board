@@ -6,6 +6,17 @@
   ansible.builtin.set_fact:
     logging_agent: "{{ logging_agent | default('alloy') | trim }}"
 
+# Override based on group membership
+- name: Set logging agent based on group membership
+  ansible.builtin.set_fact:
+    logging_agent: "promtail"
+  when: inventory_hostname in groups.get('promtail_servers', [])
+
+- name: Set logging agent based on group membership to alloy
+  ansible.builtin.set_fact:
+    logging_agent: "alloy"
+  when: inventory_hostname in groups.get('alloy_servers', []) and logging_agent != 'promtail'
+
 # Detect what's currently installed
 - name: Check if Promtail is installed
   ansible.builtin.stat:
