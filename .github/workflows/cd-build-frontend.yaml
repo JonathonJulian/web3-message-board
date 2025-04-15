@@ -118,8 +118,15 @@ jobs:
       - name: Create archive
         run: |
           cd frontend
-          # Create the tar.gz bundle using the dist directory
-          tar -czf ../frontend-bundle.tar.gz dist
+          # Create a temporary directory for bundling
+          mkdir -p bundle
+
+          # Copy dist directory and package.json to the bundle directory
+          cp -r dist bundle/
+          cp package.json bundle/
+
+          # Create the tar.gz bundle using the bundle directory
+          tar -czf ../frontend-bundle.tar.gz -C bundle .
 
           # Create artifacts directory
           mkdir -p ../artifacts
@@ -197,12 +204,12 @@ jobs:
             | 🔄 **Workflow Run** | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
             ### 📦 Included Artifacts
-            - **🌐 Frontend Bundle**: `frontend-bundle.tar.gz`
+            - **🌐 Frontend Bundle**: `frontend-bundle.tar.gz` (includes dist/ and package.json)
 
             ### 📝 Deployment Instructions
             1. Download the frontend bundle
             2. Extract the contents: `tar -xzf frontend-bundle.tar.gz`
-            3. Deploy the extracted `dist` folder to your web server
+            3. Deploy the extracted files to your web server
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
