@@ -18,6 +18,9 @@ github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"  # Token is fetched from env
 # Authentication settings
 auth:
   method: "ssh_key"  # Options: 'ssh_key' or 'password'
+  user: "ubuntu"     # Default user for SSH connections
+  # When using 'password', make sure to set ansible_ssh_pass in inventory or pass with -e
+  # With 'ssh_key', make sure SSH keys are properly set up on target hosts
 
 # User accounts and permissions
 users:
@@ -79,7 +82,7 @@ static_site_install_dir: /var/www/html
 service_name: "api"
 service_description: "Web3 Message Board API Service"
 service_github_repo: "JonathonJulian/web3-message-board"
-service_release_version: "v0.1.5-beta.1"
+service_release_version: "v0.1.8"
 service_env_vars:
   PORT: "8080"
   WEB3_CONTRACT_ADDRESS: "0xEFD38108dfE2c80f29579E6D692c4009586A3f59"
@@ -91,7 +94,7 @@ service_env_vars:
 # Static site configuration
 static_site_name: "frontend"
 static_site_github_repo: "JonathonJulian/web3-message-board"
-static_site_release_version: "v0.1.5-beta.1"
+static_site_release_version: " v0.1.8"
 static_site_archive_pattern: "frontend-bundle.tar.gz"
 
 # -----------------------------------------------------------------------------

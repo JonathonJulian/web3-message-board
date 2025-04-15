@@ -1,22 +1,64 @@
 ---
 # Tasks for deploying the static site
 
-# Download from GitHub releases
+# Check if version file exists and contains the expected version
+- name: Check if static site version exists and matches
+  ansible.builtin.shell: |
+    if [ -f "{{ static_site_install_dir }}/.version" ]; then
+      current_version=$(cat "{{ static_site_install_dir }}/.version")
+      if [ "$current_version" = "{{ static_site_release_version }}" ]; then
+        echo "Version {{ static_site_release_version }} already installed"
+        exit 0
+      else
+        echo "Version mismatch: current=$current_version, target={{ static_site_release_version }}"
+        exit 1
+      fi
+    else
+      echo "Version file not found"
+      exit 1
+    fi
+  register: version_check
+  changed_when: false
+  failed_when: false
+
+- name: Set site download fact
+  ansible.builtin.set_fact:
+    site_needs_download: "{{ version_check.rc != 0 }}"
+
+# Download from GitHub releases only if needed
 - name: Download static site from GitHub releases
   ansible.builtin.shell: |
     export GH_TOKEN="{{ github_token }}"
+    # Create a temporary directory with proper permissions
+    TEMP_DIR=$(mktemp -d)
+    cd $TEMP_DIR
+
     # Use the correct filename pattern with clobber flag to overwrite existing files
     if ! gh release download {{ static_site_release_version }} --repo {{ static_site_github_repo }} --pattern "{{ static_site_archive_pattern }}" --clobber; then
       echo "Failed to download static site"
       exit 1
     fi
 
-    # Extract to temporary directory
+    # Extract to temporary directory with proper permissions
+    mkdir -p $TEMP_DIR/static_site
+    tar -xzf {{ static_site_archive_pattern }} -C $TEMP_DIR/static_site --strip-components=1
+
+    # Store version information in the extracted files
+    echo "{{ static_site_release_version }}" > $TEMP_DIR/static_site/.version
+
+    # Copy to shared location
     mkdir -p /tmp/static_site
-    tar -xzf {{ static_site_archive_pattern }} -C /tmp/static_site --strip-components=1
+    cp -r $TEMP_DIR/static_site/* /tmp/static_site/
+    chmod -R 755 /tmp/static_site
+
+    # Clean up
+    rm -rf $TEMP_DIR
   notify: Restart Nginx
   register: download_result
   failed_when: download_result.rc != 0
+  become: false
+  become_user: ubuntu
+  when: site_needs_download
 
 # Ensure destination directory exists
 - name: Ensure destination directory exists
@@ -31,10 +73,20 @@
 # Deploy static site
 - name: Deploy static site
   ansible.builtin.shell: |
-    sudo cp -r /tmp/static_site/* {{ static_site_install_dir }}/
-    sudo chown -R {{ static_site_user }}:{{ static_site_group }} {{ static_site_install_dir }}
-    sudo chmod -R {{ static_site_dir_mode }} {{ static_site_install_dir }}
+    if [ -d "/tmp/static_site" ] && [ -n "$(ls -A /tmp/static_site)" ]; then
+      # Use rsync instead of cp for better permission handling
+      sudo rsync -av --delete /tmp/static_site/ {{ static_site_install_dir }}/
+      sudo chown -R {{ static_site_user }}:{{ static_site_group }} {{ static_site_install_dir }}
+      sudo chmod -R {{ static_site_dir_mode }} {{ static_site_install_dir }}
+      echo "Static site deployed successfully"
+    else
+      echo "Error: Source directory is empty or doesn't exist"
+      exit 1
+    fi
   notify: Restart Nginx
+  register: deploy_result
+  failed_when: deploy_result.rc != 0
+  when: site_needs_download
 
 # Ensure correct ownership and permissions
 - name: Ensure correct ownership and permissions

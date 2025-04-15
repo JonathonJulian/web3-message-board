@@ -56,20 +56,57 @@
     label: "{{ item.name }}"
   tags: ['hosts', 'kubernetes']
 
-- name: Remove existing entries from /etc/hosts
+# Check if entries already exist with correct IP
+- name: Check if hosts entries already exist with correct IP
+  ansible.builtin.shell: |
+    grep -q "^{{ item.value | trim }} {{ item.key }}$" /etc/hosts && echo "exists" || echo "missing"
+  register: host_entries_check
+  changed_when: false
+  with_dict: "{{ host_ips }}"
+  loop_control:
+    label: "{{ item.key }}"
+  tags: ['hosts']
+
+# Create a list of entries that need to be updated
+- name: Create list of entries to update
+  ansible.builtin.set_fact:
+    hosts_to_update: "{{ hosts_to_update | default([]) + [{'key': item.item.key, 'value': item.item.value}] }}"
+  when: item.stdout == "missing"
+  with_items: "{{ host_entries_check.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+  tags: ['hosts']
+
+# Remove incorrect entries only if they need updating
+- name: Remove existing entries from /etc/hosts that need updating
   ansible.builtin.lineinfile:
     path: /etc/hosts
     regexp: "{{ item.key }}"
     state: absent
-  with_dict: "{{ host_ips }}"
+  with_items: "{{ hosts_to_update | default([]) }}"
+  when: hosts_to_update is defined and hosts_to_update | length > 0
   tags: ['hosts']
 
-- name: Add entries to /etc/hosts
+# Add entries only if they need updating
+- name: Add entries to /etc/hosts that need updating
   ansible.builtin.lineinfile:
     path: /etc/hosts
-    line: "{{ item.value }} {{ item.key }}"
+    line: "{{ item.value | trim }} {{ item.key }}"
     state: present
-  with_dict: "{{ host_ips }}"
+  with_items: "{{ hosts_to_update | default([]) }}"
+  when: hosts_to_update is defined and hosts_to_update | length > 0
+  tags: ['hosts']
+
+- name: Report on changes
+  ansible.builtin.debug:
+    msg: "No changes needed to hosts file. All entries already correct."
+  when: hosts_to_update is not defined or hosts_to_update | length == 0
+  tags: ['hosts']
+
+- name: Report on updated hosts
+  ansible.builtin.debug:
+    msg: "Updated hosts entries: {{ hosts_to_update | to_nice_yaml }}"
+  when: hosts_to_update is defined and hosts_to_update | length > 0
   tags: ['hosts']
 
 - name: Display hosts file for verification
@@ -81,9 +118,4 @@
 - name: Show hosts file
   ansible.builtin.debug:
     var: hosts_file.stdout_lines
-  tags: ['hosts']
-
-- name: Display configured hosts entries
-  ansible.builtin.debug:
-    msg: "Added hosts entries: {{ host_ips | to_nice_yaml }}"
   tags: ['hosts']

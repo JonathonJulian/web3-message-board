@@ -36,7 +36,7 @@
     state: present
   loop:
     - {regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no'}
-    - {regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no'}
+    - {regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication {{ "yes" if auth.method == "password" else "no" }}'}
     - {regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes'}
     - {regexp: '^#?PermitEmptyPasswords', line: 'PermitEmptyPasswords no'}
     - {regexp: '^#?X11Forwarding', line: 'X11Forwarding no'}

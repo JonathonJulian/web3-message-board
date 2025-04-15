@@ -1,0 +1,7 @@
+# Managed by Ansible - {{ ansible_managed }}
+[Service]
+# Use original ExecStart but ensure service restarts properly
+Restart=always
+RestartSec=5
+RuntimeDirectory=fail2ban
+RuntimeDirectoryMode=0755

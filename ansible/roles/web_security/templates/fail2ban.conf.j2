@@ -1,0 +1,38 @@
+# Fail2Ban main configuration file
+# Managed by Ansible - {{ ansible_managed }}
+
+[Definition]
+
+# Option: loglevel
+# Level of verbosity
+# Default: 1 = errors and basic info
+# Set 2, 3 or more for more verbose logging
+loglevel = INFO
+
+# Option: logtarget
+# Default: STDERR
+# Values: STDOUT, STDERR, SYSLOG, FILE
+# Option: syslogsocket
+#         Auto detected when logtarget=SYSLOG
+logtarget = /var/log/fail2ban.log
+
+# Option: syslog-target
+syslogsocket = auto
+
+# Option: socket
+# Default: /var/run/fail2ban/fail2ban.sock
+socket = /var/run/fail2ban/fail2ban.sock
+
+# Option: pidfile
+# Default: /var/run/fail2ban/fail2ban.pid
+pidfile = /var/run/fail2ban/fail2ban.pid
+
+# Options: dbfile, dbpurgeage
+# Default: /var/lib/fail2ban/fail2ban.sqlite3, 86400
+dbfile = /var/lib/fail2ban/fail2ban.sqlite3
+dbpurgeage = 86400
+
+# Option: allowipv6
+# Default: auto
+# Values: true, false, auto
+allowipv6 = true

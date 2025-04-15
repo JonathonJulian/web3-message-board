@@ -15,6 +15,7 @@ PLATFORMS ?= linux/amd64,linux/arm64
 AUTH_METHOD ?= ssh_key
 SSH_KEY_FILE ?= ~/.ssh/id_rsa
 SSH_PASSWORD ?=
+SSH_USER ?=
 
 .PHONY: help
 help:
@@ -232,11 +233,13 @@ ansible-deps:
 	fi
 
 .PHONY: ansible-deploy
-ansible-deploy: ansible-deps
+ansible-deploy:
 	@echo "Running Ansible playbook..."
 	@if [ -f ".ansible_venv/bin/activate" ]; then \
+		export GITHUB_TOKEN="$(gh auth token)" && \
 		. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini $(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',); \
 	else \
+		export GITHUB_TOKEN="$(gh auth token)" && \
 		cd ansible && ansible-playbook msg_board.yaml -i inventory.ini $(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',); \
 	fi
 
@@ -245,7 +248,7 @@ ansible-deploy-ssh: ansible-deps
 	@echo "Running Ansible playbook with SSH key authentication..."
 	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini \
 		--private-key=$(SSH_KEY_FILE) \
-		-e 'auth={"method":"ssh_key"}' \
+		-e 'auth={"method":"ssh_key","user":"$(SSH_USER)"}' \
 		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-deploy-password
@@ -258,7 +261,7 @@ ansible-deploy-password: ansible-deps
 	@echo "Running Ansible playbook with password authentication..."
 	. .ansible_venv/bin/activate && cd ansible && ansible-playbook msg_board.yaml -i inventory.ini \
 		--extra-vars "ansible_password=$(SSH_PASSWORD) ansible_become_password=$(SSH_PASSWORD)" \
-		-e 'auth={"method":"password"}' \
+		-e 'auth={"method":"password","user":"$(SSH_USER)"}' \
 		$(if $(ANSIBLE_EXTRA_VARS),--extra-vars '$(ANSIBLE_EXTRA_VARS)',)
 
 .PHONY: ansible-nginx
